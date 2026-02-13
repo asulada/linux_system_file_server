@@ -18,46 +18,57 @@ const (
 type FileNode struct {
 	ID       uint64
 	ParentID uint64
-	Name     string
-	Path     string // 全路径，换取搜索和清理的 O(1) 性能
-	Ext      string
-	Size     int64
-	ModTime  int64
-	IsDir    bool
+
+	Size    int64
+	ModTime int64
+	IsDir   bool
+
+	// 指向字节块的偏移量和长度
+	NameOff uint32
+	NameLen uint16
+	PathOff uint32
+	PathLen uint16
 }
+
+// 辅助方法：处理 IsDir 标志位
+const IsDirMask uint64 = 1 << 63
+
+func (n *FileNode) IsDirectory() bool { return n.ID&IsDirMask != 0 }
+func (n *FileNode) GetRealID() uint64 { return n.ID &^ IsDirMask }
 
 type MoveEvent struct {
 	OldPath string
 	Expiry  time.Time
 }
 
-type FileSystemIndex struct {
+var (
 	mu      sync.RWMutex
 	lastID  uint64
-	Nodes   map[uint64]*FileNode
-	PathMap map[string]uint64
+	Nodes   = make(map[uint64]FileNode, 200000)
+	PathMap = make(map[string]uint64, 200000)
 	// 修改为嵌套 Map：ParentID -> {ChildID: struct{}}
-	TreeMap  map[uint64]map[uint64]struct{}
-	WdMap    map[int]string
-	PathToWd map[string]int // Path -> wd (用于重命名时快速更新路径)
-
-	muMove       sync.Mutex
-	pendingMoves map[uint32]*MoveEvent // Cookie -> Event
+	TreeMap  = make(map[uint64]map[uint64]struct{}, 50000)
+	WdMap    = make(map[int]string, 50000)
+	PathToWd = make(map[string]int, 50000) // Path -> wd (用于重命名时快速更新路径)
 
 	// 3. 排序向量：只存 Nodes 的下标，极致省内存
-	TimeIdx []uint64 // 按时间排序
-	SizeIdx []uint64 // 按大小排序
-	NameIdx []uint64 // 按名称排序
+	TimeIdx = make([]uint64, 200000) // 按时间排序
+	SizeIdx = make([]uint64, 200000) // 按大小排序
+	NameIdx = make([]uint64, 200000) // 按名称排序
 
 	sizeSort bool
 	nameSort bool
+
+	Store *StringStore
+)
+
+type FileSystemIndex struct {
+	muMove       sync.Mutex
+	pendingMoves map[uint32]*MoveEvent // Cookie -> Event
 }
 
 func NewFileSystemIndex() *FileSystemIndex {
 	return &FileSystemIndex{
-		Nodes:   make(map[uint64]*FileNode, 200000),
-		PathMap: make(map[string]uint64, 200000),
-		TreeMap: make(map[uint64]map[uint64]struct{}, 50000),
-		WdMap:   make(map[int]string, 50000),
+		pendingMoves: make(map[uint32]*MoveEvent, 1000),
 	}
 }

@@ -31,40 +31,40 @@ func (f *FileSystemIndex) RebuildAllIndexes() {
 	// 并行排序 (Go 1.25 pdqsort 优化)
 	go func() {
 		defer wg.Done()
-		sort.Slice(f.TimeIdx, func(i, j int) bool {
-			return f.Nodes[f.TimeIdx[i]].ModTime > f.Nodes[f.TimeIdx[j]].ModTime // 倒序
+		sort.Slice(TimeIdx, func(i, j int) bool {
+			return Nodes[TimeIdx[i]].ModTime > Nodes[TimeIdx[j]].ModTime // 倒序
 		})
 	}()
 
 	go func() {
 		defer wg.Done()
-		sort.Slice(f.SizeIdx, func(i, j int) bool {
-			return f.Nodes[f.SizeIdx[i]].Size > f.Nodes[f.SizeIdx[j]].Size
+		sort.Slice(SizeIdx, func(i, j int) bool {
+			return Nodes[SizeIdx[i]].Size > Nodes[SizeIdx[j]].Size
 		})
 	}()
 
 	go func() {
 		defer wg.Done()
-		sort.Slice(f.NameIdx, func(i, j int) bool {
-			return f.Nodes[f.NameIdx[i]].Name < f.Nodes[f.NameIdx[j]].Name
+		sort.Slice(NameIdx, func(i, j int) bool {
+			return Nodes[NameIdx[i]].Name < Nodes[NameIdx[j]].Name
 		})
 	}()
 
 	wg.Wait()
-	f.nameSort = false
-	f.sizeSort = false
+	nameSort = false
+	sizeSort = false
 }
 
 // 重置大小排序
 func (f *FileSystemIndex) RebuildSizeIndexes() {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	mu.Lock()
+	defer mu.Unlock()
 
-	count := uint64(len(f.Nodes))
+	count := uint64(len(Nodes))
 
 	// 初始化索引向量
-	f.TimeIdx = make([]uint64, count)
-	f.SizeIdx = make([]uint64, count)
+	TimeIdx = make([]uint64, count)
+	SizeIdx = make([]uint64, count)
 
 	//遍历节点,获取序号和key
 	i := uint64(0)

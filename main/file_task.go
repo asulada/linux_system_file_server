@@ -23,21 +23,37 @@ func (f *FileSystemIndex) StartPersistenceTask(ctx context.Context, storagePath 
 	for {
 		select {
 		case <-saveTicker.C:
-			// 定时保存
-			logger.Infof("[%s] 执行定时自动保存...", time.Now().Format("15:04:05"))
-			if err := f.Save(storagePath); err != nil {
-				logger.Error("定时保存失败: ", err)
-			}
+			//清理无用字节块
+			logger.Infof("执行定时清理无用字节块...")
+			Store.Compact()
+
 			// 清理失效排序
-			logger.Infof("[%s] 执行定时清理失效排序...", time.Now().Format("15:04:05"))
+			logger.Infof("执行定时清理失效排序...")
 			if err := f.Save(storagePath); err != nil {
 				logger.Error("清理失效排序: ", err)
+			}
+
+			// 定时保存
+			logger.Infof("执行定时自动保存...")
+			if err := f.Save(storagePath); err != nil {
+				logger.Error("定时保存失败: ", err)
 			}
 
 		case sig := <-sigChan:
 			// 捕获到退出信号
 			logger.Infof("n收到信号 [%v]，正在执行安全退出前的数据保存...", sig)
 			start := time.Now()
+
+			//清理无用字节块
+			logger.Infof("退出前清理无用字节块...")
+			Store.Compact()
+
+			// 清理失效排序
+			logger.Infof("退出前清理失效排序...")
+			if err := f.Save(storagePath); err != nil {
+				logger.Error("清理失效排序: ", err)
+			}
+
 			if err := f.Save(storagePath); err != nil {
 				logger.Error("退出前保存失败: ", err)
 			}

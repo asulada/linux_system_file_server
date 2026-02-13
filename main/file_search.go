@@ -22,17 +22,17 @@ func (f *FileSystemIndex) Search(req SearchReq) []*FileNode {
 	var targetIdx *[]uint64
 	switch req.SortBy {
 	case "size":
-		if f.sizeSort {
+		if sizeSort {
 			f.RebuildSizeIndexes()
 		}
-		targetIdx = &f.SizeIdx
+		targetIdx = &SizeIdx
 	case "time":
-		targetIdx = &f.TimeIdx
+		targetIdx = &TimeIdx
 	default:
-		if f.nameSort {
+		if nameSort {
 			f.RebuildNameIndexes()
 		}
-		targetIdx = &f.NameIdx
+		targetIdx = &NameIdx
 	}
 
 	var results []*FileNode
@@ -40,12 +40,12 @@ func (f *FileSystemIndex) Search(req SearchReq) []*FileNode {
 
 	// 2. 遍历索引向量 (Everything 的核心搜索逻辑)
 	for _, nodeIdx := range *targetIdx {
-		node, exists := f.Nodes[nodeIdx]
+		node, exists := Nodes[nodeIdx]
 		if !exists {
 			continue // 发现 ID 已不在主表，说明被删了，跳过
 		}
 		// 关键词匹配
-		if matchKeywords(&node.Name, &req.Keywords) {
+		if matchKeywords(Store.Get(node.NameOff, node.NameLen), &req.Keywords) {
 			matchCount++
 			if matchCount > req.Offset {
 				results = append(results, node)

@@ -10,8 +10,8 @@ import (
 
 // 持久化 (Gob)
 func (f *FileSystemIndex) Save(filePath string) error {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
+	mu.RLock()
+	defer mu.RUnlock()
 
 	tempPath := filePath + ".tmp"
 	file, err := os.Create(tempPath)
@@ -27,19 +27,19 @@ func (f *FileSystemIndex) Save(filePath string) error {
 
 	// 2. 写入数据
 	enc := gob.NewEncoder(bw)
-	if err := enc.Encode(f.Nodes); err != nil {
+	if err := enc.Encode(Nodes); err != nil {
 		return err
 	}
 	// 写入 TimeIdx
-	if err := enc.Encode(f.TimeIdx); err != nil {
+	if err := enc.Encode(TimeIdx); err != nil {
 		return err
 	}
 	// 写入 SizeIdx
-	if err := enc.Encode(f.SizeIdx); err != nil {
+	if err := enc.Encode(SizeIdx); err != nil {
 		return err
 	}
 	// 写入 NameIdx
-	if err := enc.Encode(f.NameIdx); err != nil {
+	if err := enc.Encode(NameIdx); err != nil {
 		return err
 	}
 	bw.Flush()
@@ -71,39 +71,39 @@ func (f *FileSystemIndex) Load(filePath string) error {
 	}
 
 	// 3. 解码数据
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	mu.Lock()
+	defer mu.Unlock()
 
 	dec := gob.NewDecoder(br)
 	// 解码 Nodes
-	if err := dec.Decode(&f.Nodes); err != nil {
+	if err := dec.Decode(&Nodes); err != nil {
 		return err
 	}
 	// 解码 TimeIdx
-	if err := dec.Decode(&f.TimeIdx); err != nil {
+	if err := dec.Decode(&TimeIdx); err != nil {
 		return err
 	}
 	// 解码 SizeIdx
-	if err := dec.Decode(&f.SizeIdx); err != nil {
+	if err := dec.Decode(&SizeIdx); err != nil {
 		return err
 	}
 	// 解码 NameIdx
-	if err := dec.Decode(&f.NameIdx); err != nil {
+	if err := dec.Decode(&NameIdx); err != nil {
 		return err
 	}
 
 	// 重建 PathMap 和 TreeMap
-	for id, node := range f.Nodes {
-		f.PathMap[node.Path] = id
+	for id, node := range Nodes {
+		PathMap[Store.Get(node.PathOff, node.PathLen)] = id
 
 		// 关键：初始化并填充 TreeMap
-		if f.TreeMap[node.ParentID] == nil {
-			f.TreeMap[node.ParentID] = make(map[uint64]struct{})
+		if TreeMap[node.ParentID] == nil {
+			TreeMap[node.ParentID] = make(map[uint64]struct{})
 		}
-		f.TreeMap[node.ParentID][id] = struct{}{}
+		TreeMap[node.ParentID][id] = struct{}{}
 
-		if id > f.lastID {
-			f.lastID = id
+		if id > lastID {
+			lastID = id
 		}
 	}
 	return nil
