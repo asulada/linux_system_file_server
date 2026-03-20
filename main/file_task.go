@@ -29,9 +29,7 @@ func (f *FileSystemIndex) StartPersistenceTask(ctx context.Context, storagePath 
 
 			// 清理失效排序
 			logger.Infof("执行定时清理失效排序...")
-			if err := f.Save(storagePath); err != nil {
-				logger.Error("清理失效排序: ", err)
-			}
+			f.SortCheckAndCompact()
 
 			// 定时保存
 			logger.Infof("执行定时自动保存...")
@@ -50,9 +48,7 @@ func (f *FileSystemIndex) StartPersistenceTask(ctx context.Context, storagePath 
 
 			// 清理失效排序
 			logger.Infof("退出前清理失效排序...")
-			if err := f.Save(storagePath); err != nil {
-				logger.Error("清理失效排序: ", err)
-			}
+			f.SortCompact()
 
 			if err := f.Save(storagePath); err != nil {
 				logger.Error("退出前保存失败: ", err)

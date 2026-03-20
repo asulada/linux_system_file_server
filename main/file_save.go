@@ -102,6 +102,7 @@ func (f *FileSystemIndex) Load(filePath string) error {
 		}
 		TreeMap[node.ParentID][id] = struct{}{}
 
+		ChildTreeMap[id] = node.ParentID
 		if id > lastID {
 			lastID = id
 		}

@@ -21,7 +21,7 @@ type FileNode struct {
 
 	Size    int64
 	ModTime int64
-	IsDir   bool
+	//IsDir   bool
 
 	// 指向字节块的偏移量和长度
 	NameOff uint32
@@ -33,11 +33,20 @@ type FileNode struct {
 // 辅助方法：处理 IsDir 标志位
 const IsDirMask uint64 = 1 << 63
 
-func (n *FileNode) IsDirectory() bool { return n.ID&IsDirMask != 0 }
+func (n *FileNode) IsDir() bool       { return n.ID&IsDirMask != 0 }
 func (n *FileNode) GetRealID() uint64 { return n.ID &^ IsDirMask }
+
+func SetRealID(id uint64, isDir bool) uint64 {
+	if isDir {
+		id |= IsDirMask // 只在是目录时设置标志位
+	}
+	// 是文件时什么都不做，因为 realID 最高位本来就是 0
+	return id
+}
 
 type MoveEvent struct {
 	OldPath string
+	OldName string
 	Expiry  time.Time
 }
 
@@ -47,9 +56,11 @@ var (
 	Nodes   = make(map[uint64]FileNode, 200000)
 	PathMap = make(map[string]uint64, 200000)
 	// 修改为嵌套 Map：ParentID -> {ChildID: struct{}}
-	TreeMap  = make(map[uint64]map[uint64]struct{}, 50000)
-	WdMap    = make(map[int]string, 50000)
-	PathToWd = make(map[string]int, 50000) // Path -> wd (用于重命名时快速更新路径)
+	TreeMap = make(map[uint64]map[uint64]struct{}, 50000)
+
+	ChildTreeMap = make(map[uint64]uint64, 50000)
+	WdMap        = make(map[int]string, 50000)
+	PathToWd     = make(map[string]int, 50000) // Path -> wd (用于重命名时快速更新路径)
 
 	// 3. 排序向量：只存 Nodes 的下标，极致省内存
 	TimeIdx = make([]uint64, 200000) // 按时间排序

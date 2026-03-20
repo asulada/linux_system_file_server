@@ -1,0 +1,17 @@
+log:
+  level: info
+  filename: ./logs/default.log
+  maxsize: 100
+  maxbackups: 3
+  maxage: 30
+  isstacktrace: true
+  isstdout: true
+
+roots:
+  - D:/data
+  - E:/files
+
+dumpPath: ./dump
+account: admin
+password: admin123
+jwtSecret: your-super-secret-key-here-2024
