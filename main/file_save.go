@@ -42,6 +42,10 @@ func (f *FileSystemIndex) Save(filePath string) error {
 	if err := enc.Encode(NameIdx); err != nil {
 		return err
 	}
+	// 写入 Store
+	if err := enc.Encode(Store); err != nil {
+		return err
+	}
 	bw.Flush()
 	file.Close()
 
@@ -91,7 +95,10 @@ func (f *FileSystemIndex) Load(filePath string) error {
 	if err := dec.Decode(&NameIdx); err != nil {
 		return err
 	}
-
+	// 解码 Store
+	if err := dec.Decode(&Store); err != nil {
+		return err
+	}
 	// 重建 PathMap 和 TreeMap
 	for id, node := range Nodes {
 		PathMap[Store.Get(node.PathOff, node.PathLen)] = id

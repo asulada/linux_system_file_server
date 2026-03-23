@@ -133,6 +133,7 @@ func search(c *gin.Context) {
 		})
 		return
 	}
+	logger.Info("收到 json 参数", zap.Reflect("req", req))
 	result := fileSystem.Search(req)
 	SendResponse(c, http.StatusOK, "", result)
 
@@ -140,7 +141,7 @@ func search(c *gin.Context) {
 
 func main() {
 	initConfig()
-	initLog()
+	logger = initLog()
 
 	fileSystem = NewFileSystemIndex()
 	fileSystem.Start(selfConfig.Roots, selfConfig.DumpPath)

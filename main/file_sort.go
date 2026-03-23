@@ -8,6 +8,8 @@ import (
 
 // 重置所有排序
 func (f *FileSystemIndex) RebuildAllIndexes() {
+	defer TimeTrack(time.Now(), "RebuildAllIndexes")
+
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -62,6 +64,8 @@ func (f *FileSystemIndex) RebuildAllIndexes() {
 
 // 重置大小排序
 func (f *FileSystemIndex) RebuildSizeIndexes() {
+	defer TimeTrack(time.Now(), "RebuildSizeIndexes")
+
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -102,6 +106,8 @@ func (f *FileSystemIndex) RebuildSizeIndexes() {
 
 // 重置名称排序
 func (f *FileSystemIndex) RebuildNameIndexes() {
+	defer TimeTrack(time.Now(), "RebuildNameIndexes")
+
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -119,7 +125,7 @@ func (f *FileSystemIndex) RebuildNameIndexes() {
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(2)
 
 	// 并行排序 (Go 1.25 pdqsort 优化)
 	go func() {

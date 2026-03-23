@@ -63,14 +63,14 @@ var (
 	PathToWd     = make(map[string]int, 50000) // Path -> wd (用于重命名时快速更新路径)
 
 	// 3. 排序向量：只存 Nodes 的下标，极致省内存
-	TimeIdx = make([]uint64, 200000) // 按时间排序
-	SizeIdx = make([]uint64, 200000) // 按大小排序
-	NameIdx = make([]uint64, 200000) // 按名称排序
+	TimeIdx []uint64 // 按时间排序
+	SizeIdx []uint64 // 按大小排序
+	NameIdx []uint64 // 按名称排序
 
 	sizeSort bool
 	nameSort bool
 
-	Store *StringStore
+	Store = &StringStore{} // ✅ 初始化为空实例
 )
 
 type FileSystemIndex struct {
@@ -82,4 +82,12 @@ func NewFileSystemIndex() *FileSystemIndex {
 	return &FileSystemIndex{
 		pendingMoves: make(map[uint32]*MoveEvent, 1000),
 	}
+}
+
+// 性能监控装饰器
+func TimeTrack(start time.Time, funcName string) {
+	elapsed := time.Since(start)
+	logger.Infow("方法执行时间",
+		"function", funcName,
+		"duration", elapsed)
 }

@@ -12,9 +12,29 @@ type SearchReq struct {
 	Limit    int      `json:"limit"`
 }
 
+type SearchResult struct {
+	ID      uint64 `json:"id"`
+	Name    string `json:"name"`
+	Size    int64  `json:"size"`
+	Path    string `json:"path"`
+	ModTime int64  `json:"modTime"`
+	IsDir   bool   `json:"isDir"`
+}
+
+func NewSeachResult(name *string, node *FileNode) *SearchResult {
+	return &SearchResult{
+		ID:      node.GetRealID(),
+		Size:    node.Size,
+		Name:    *name,
+		Path:    Store.Get(node.PathOff, node.PathLen),
+		ModTime: node.ModTime,
+		IsDir:   node.IsDir(),
+	}
+}
+
 // SearchPaged 分页多关键词搜索
 
-func (f *FileSystemIndex) Search(req SearchReq) []*FileNode {
+func (f *FileSystemIndex) Search(req SearchReq) []*SearchResult {
 	//f.mu.RLock()
 	//defer f.mu.RUnlock()
 
@@ -35,21 +55,25 @@ func (f *FileSystemIndex) Search(req SearchReq) []*FileNode {
 		targetIdx = &NameIdx
 	}
 
-	var results []*FileNode
+	logger.Info("索引长度 ", len(*targetIdx))
+	results := make([]*SearchResult, 0)
 	//matchCount := 0
 
 	// 2. 遍历索引向量 (Everything 的核心搜索逻辑)
 	for index, nodeIdx := range *targetIdx {
-		if index > req.Offset {
+		logger.Info("索引: ", index, " 值 ", nodeIdx)
+		if index >= req.Offset {
 			node, exists := Nodes[nodeIdx]
 			if !exists {
 				continue // 发现 ID 已不在主表，说明被删了，跳过
 			}
+			logger.Infof("遍历: %s", Store.Get(node.NameOff, node.NameLen))
 			// 关键词匹配
-			if matchKeywords(Store.Get(node.NameOff, node.NameLen), &req.Keywords) {
+			name := Store.Get(node.NameOff, node.NameLen)
+			if matchKeywords(&name, &req.Keywords) {
 				//matchCount++
 				//if matchCount > req.Offset {
-				results = append(results, &node)
+				results = append(results, NewSeachResult(&name, &node))
 				//}
 				if len(results) >= req.Limit {
 					break // 达标即止，极速响应
@@ -60,9 +84,9 @@ func (f *FileSystemIndex) Search(req SearchReq) []*FileNode {
 	return results
 }
 
-func matchKeywords(fileName string, keywords *[]string) bool {
+func matchKeywords(fileName *string, keywords *[]string) bool {
 	for _, keyword := range *keywords {
-		if !strings.Contains(fileName, keyword) {
+		if !strings.Contains(*fileName, keyword) {
 			return false
 		}
 	}

@@ -40,11 +40,12 @@ func (f *FileSystemIndex) Start(roots []string, storagePath string) {
 
 	f.setupWatches(fd, pathChan)
 	go f.runEventLoop(fd)
-	f.StartPersistenceTask(context.Background(), storagePath)
+	go f.StartPersistenceTask(context.Background(), storagePath)
 }
 
 // 1.1 ParallelBFSScan 广度优先扫描，确保父节点先于子节点入库
 func (f *FileSystemIndex) ParallelBFSScan(roots []string, pathChan chan<- string) {
+	logger.Info("广度优先扫描开始...", roots)
 	queue := roots
 	limit := make(chan struct{}, 4) // 限制并发数
 	var globalWg sync.WaitGroup     // 全局 WaitGroup
@@ -60,6 +61,7 @@ func (f *FileSystemIndex) ParallelBFSScan(roots []string, pathChan chan<- string
 			limit <- struct{}{}
 			defer func() { <-limit }()
 
+			logger.Info("广度优先扫描：正在处理", path)
 			// 插入当前节点
 			info, err := os.Stat(path)
 			if err != nil {
@@ -164,6 +166,7 @@ func (f *FileSystemIndex) Upsert(path string) {
 
 	f.UpsertParentSize(id, info.Size())
 	sizeSort = true
+	nameSort = true
 }
 func (f *FileSystemIndex) UpsertParentSize(childId uint64, size int64) {
 	// 更新父节点的 Size
@@ -215,6 +218,8 @@ func (f *FileSystemIndex) UpsertDir(fullPath string, name string, parentPath str
 	ChildTreeMap[id] = parentID
 
 	sizeSort = true
+	nameSort = true
+
 }
 
 func (f *FileSystemIndex) Remove(path string, isDir bool) {

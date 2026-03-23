@@ -8,8 +8,8 @@ log:
   isstdout: true
 
 roots:
-  - D:/data
-  - E:/files
+  - /root/2
+  - /root/5
 
 dumpPath: ./dump
 account: admin
