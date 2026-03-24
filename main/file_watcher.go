@@ -2,13 +2,14 @@ package main
 
 import (
 	"context"
-	"golang.org/x/sys/unix"
 	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 // 1 启动入口：根据 storageExists 判断加载模式
@@ -101,6 +102,8 @@ func (f *FileSystemIndex) setupWatches(fd int, paths <-chan string) {
 					WdMap[wd] = path
 					PathToWd[path] = wd
 					mu.Unlock()
+				} else {
+					logger.Error("监听目录失败", path, err)
 				}
 			}
 		}()
