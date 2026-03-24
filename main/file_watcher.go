@@ -246,6 +246,7 @@ func (f *FileSystemIndex) Remove(path string, isDir bool) {
 			curPath := Store.Get(node.PathOff, node.PathLen)
 			delete(PathMap, curPath)
 			delete(Nodes, currID)
+			f.UpsertParentSize(currID, -node.Size)
 
 			// 【新增】清理 WdMap 和 PathToWd
 			if wd, exists := PathToWd[curPath]; exists {
@@ -264,6 +265,7 @@ func (f *FileSystemIndex) Remove(path string, isDir bool) {
 		if node, exists := Nodes[id]; exists {
 			if children, ok := TreeMap[node.ParentID]; ok {
 				delete(children, id) // O(1) 操作
+				f.UpsertParentSize(id, -node.Size)
 			}
 		}
 		delete(ChildTreeMap, id)
