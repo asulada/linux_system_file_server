@@ -302,12 +302,9 @@ func (f *FileSystemIndex) runEventLoop(fd int) {
 			} else {
 				if isDir {
 					f.UpsertDir(fullPath, name, dirPath, time.Now())
+					f.addWatch(fd, fullPath)
 				} else {
 					f.Upsert(fullPath)
-				}
-				// 若新建目录，自动加入并行监听队列或直接同步加 Watch
-				if mask&(unix.IN_ISDIR|unix.IN_CREATE) != 0 {
-					f.addWatch(fd, fullPath)
 				}
 			}
 			offset += unix.SizeofInotifyEvent + event.Len
