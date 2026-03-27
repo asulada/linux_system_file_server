@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -47,45 +48,66 @@ func (f *FileSystemIndex) Start(roots []string, storagePath string) {
 // 1.1 ParallelBFSScan 广度优先扫描，确保父节点先于子节点入库
 func (f *FileSystemIndex) ParallelBFSScan(roots []string, pathChan chan<- string) {
 	logger.Info("广度优先扫描开始...", roots)
-	queue := roots
-	limit := make(chan struct{}, 4) // 限制并发数
-	var globalWg sync.WaitGroup     // 全局 WaitGroup
 
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:] // 取出当前路径
+	workQueue := make(chan string, 1000)
+	limit := make(chan struct{}, 4)
+	var globalWg sync.WaitGroup
+	var enqueueWg sync.WaitGroup
 
-		globalWg.Add(1)
-		go func(path string) {
-			pathChan <- path
-			defer globalWg.Done()
-			limit <- struct{}{}
-			defer func() { <-limit }()
+	// 启动消费者池：固定数量的 goroutine 从队列取任务
+	for i := 0; i < 4; i++ {
+		go func() {
+			for path := range workQueue {
+				func() {
+					limit <- struct{}{}
+					defer func() { <-limit }()
 
-			logger.Info("广度优先扫描：正在处理", path)
-			// 插入当前节点
-			info, err := os.Stat(path)
-			if err != nil {
-				logger.Error("广度优先扫描失败", path)
-				return
+					defer globalWg.Done()
+					pathChan <- path
+					logger.Info("广度优先扫描：正在处理", path)
+
+					entries, _ := os.ReadDir(path)
+					for _, entry := range entries {
+						fullPath := filepath.Join(path, entry.Name())
+						if entry.IsDir() {
+							logger.Info("广度优先扫描：发现子目录", fullPath)
+							info, _ := os.Stat(fullPath)
+							f.UpsertDir(fullPath, entry.Name(), path, info.ModTime())
+
+							enqueueWg.Add(1)
+							workQueue <- fullPath
+							globalWg.Add(1)
+						} else {
+							f.Upsert(fullPath)
+						}
+					}
+				}()
 			}
-			f.UpsertDir(path, info.Name(), filepath.Dir(path), info.ModTime())
-
-			// 读取子目录并加入队列
-			entries, _ := os.ReadDir(path)
-			for _, entry := range entries {
-				fullPath := filepath.Join(path, entry.Name())
-				if entry.IsDir() {
-					queue = append(queue, fullPath) // 动态扩展队列
-				} else {
-					f.Upsert(fullPath) // 文件直接插入
-				}
-			}
-		}(current)
+		}()
 	}
 
-	globalWg.Wait() // 等待所有任务完成
+	// 生产者：先加入所有根目录
+	for _, root := range roots {
+		info, err := os.Stat(root)
+		if err != nil {
+			logger.Error("根目录不存在", root, err)
+			continue
+		}
+		f.UpsertDir(root, info.Name(), filepath.Dir(root), info.ModTime())
+		enqueueWg.Add(1)
+		workQueue <- root
+		globalWg.Add(1)
+	}
+
+	// 等待所有入队操作完成，然后关闭队列
+	go func() {
+		enqueueWg.Wait()
+		close(workQueue)
+	}()
+
+	globalWg.Wait()
 	close(pathChan)
+	logger.Info("广度优先扫描完成")
 }
 
 // 2 并行建立监听的核心逻辑
@@ -173,12 +195,18 @@ func (f *FileSystemIndex) Upsert(path string) {
 }
 func (f *FileSystemIndex) UpsertParentSize(childId uint64, size int64) {
 	// 更新父节点的 Size
-	if parentID, ok := ChildTreeMap[childId]; ok {
-		parentNode := Nodes[parentID]
-		parentNode.Size += size
-		Nodes[parentID] = parentNode
+	for true {
+		if parentID, ok := ChildTreeMap[childId]; ok {
+			parentNode := Nodes[parentID]
+			parentNode.Size += size
+			Nodes[parentID] = parentNode
+			childId = parentID
+		} else {
+			return
+		}
 	}
 }
+
 func (f *FileSystemIndex) UpsertDir(fullPath string, name string, parentPath string, time time.Time) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -274,6 +302,16 @@ func (f *FileSystemIndex) Remove(path string, isDir bool) {
 	}
 }
 
+func (f *FileSystemIndex) ignoreSuffix(name string) bool {
+	//判断字符串结尾是否以 .swp结尾
+	for _, suffix := range selfConfig.excludeSuffix {
+		if strings.HasSuffix(name, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
 // 4. Watcher 核心：Inotify 事件循环
 func (f *FileSystemIndex) runEventLoop(fd int) {
 	buf := make([]byte, 4096)
@@ -296,13 +334,20 @@ func (f *FileSystemIndex) runEventLoop(fd int) {
 			isDir := (mask & unix.IN_ISDIR) != 0
 
 			name := unix.ByteSliceToString(buf[offset+unix.SizeofInotifyEvent : offset+unix.SizeofInotifyEvent+event.Len])
+
+			if f.ignoreSuffix(name) {
+				continue
+			}
 			fullPath := filepath.Join(dirPath, name)
 
 			if mask&(unix.IN_MOVED_FROM|unix.IN_MOVED_TO) != 0 {
-				f.handleMoveEvent(event, fullPath, fd, name, isDir)
-			} else if mask&(unix.IN_DELETE_SELF|unix.IN_MOVE_SELF) != 0 {
+				logger.Info("处理移动事件：", event.Mask, fullPath)
+				f.handleMoveEvent(event, fullPath, fd, name, isDir, dirPath)
+			} else if mask&(unix.IN_DELETE_SELF) != 0 {
+				logger.Info("处理删除事件 1 ：", event.Mask, fullPath)
 				f.Remove(dirPath, isDir)
 			} else if mask&unix.IN_DELETE != 0 {
+				logger.Info("处理删除事件 2 ：", event.Mask, fullPath)
 				f.Remove(fullPath, isDir)
 			} else {
 				if isDir {
@@ -327,16 +372,17 @@ func (f *FileSystemIndex) addWatch(fd int, fullPath string) {
 
 // 监听 移动事件
 // 引入一个临时的 pendingMoves 缓存，用来暂存等待匹配的移动事件。
-func (f *FileSystemIndex) handleMoveEvent(event *unix.InotifyEvent, fullPath string, fd int, fileName string, isDir bool) {
+func (f *FileSystemIndex) handleMoveEvent(event *unix.InotifyEvent, fullPath string, fd int, fileName string, isDir bool, pPath string) {
 	f.muMove.Lock()
 	defer f.muMove.Unlock()
 
 	// 1. 处理移出 (FROM)
 	if (event.Mask & unix.IN_MOVED_FROM) != 0 {
 		f.pendingMoves[event.Cookie] = &MoveEvent{
-			OldPath: fullPath,
-			OldName: fileName,
-			Expiry:  time.Now().Add(100 * time.Millisecond), // 100ms 内等待匹配
+			OldPath:  fullPath,
+			OldName:  fileName,
+			OldPPath: pPath,
+			Expiry:   time.Now().Add(100 * time.Millisecond), // 100ms 内等待匹配
 		}
 		// 启动一个清理协程，如果 100ms 没匹配上，说明是移出到监控区域外，执行删除
 		go func(cookie uint32, path string) {
@@ -358,13 +404,16 @@ func (f *FileSystemIndex) handleMoveEvent(event *unix.InotifyEvent, fullPath str
 		if move, exists := f.pendingMoves[event.Cookie]; exists {
 			// 【核心优化】匹配成功：执行重命名而不是删除再新建
 			delete(f.pendingMoves, event.Cookie)
-			f.RenameNode(move.OldPath, move.OldName, fullPath, fileName)
+			f.RenameNode(move.OldPath, move.OldName, fullPath, fileName, fd, move.OldPPath, pPath)
 		} else {
-			// 如果没匹配到 Cookie，说明是从外部移入，执行新增
-			f.Upsert(fullPath)
 
 			if isDir {
+				f.UpsertDir(fullPath, fileName, filepath.Dir(fullPath), time.Now())
 				f.addWatch(fd, fullPath)
+
+			} else {
+				// 如果没匹配到 Cookie，说明是从外部移入，执行新增
+				f.Upsert(fullPath)
 			}
 
 		}
@@ -374,7 +423,7 @@ func (f *FileSystemIndex) handleMoveEvent(event *unix.InotifyEvent, fullPath str
 
 // O(1) 路径重命名 (RenameNode)
 // 由于我们存储了全路径，重命名时只需修改对应的 Node。如果是目录，则需要级联修改其下所有子项的路径前缀。
-func (f *FileSystemIndex) RenameNode(oldPath string, oldName string, newPath string, newName string) {
+func (f *FileSystemIndex) RenameNode(oldPath string, oldName string, newPath string, newName string, fd int, oldPPath string, newPPath string) {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -384,6 +433,9 @@ func (f *FileSystemIndex) RenameNode(oldPath string, oldName string, newPath str
 	}
 
 	node := Nodes[id]
+	// 获取父节点信息
+	oldParentID := node.ParentID
+
 	oldPathLen := len(oldPath)
 
 	// 1. 将字符串存入字节块
@@ -396,6 +448,34 @@ func (f *FileSystemIndex) RenameNode(oldPath string, oldName string, newPath str
 	node.PathOff = pOff
 	node.PathLen = pLen
 
+	// 2. 更新父子关系
+	// 从旧父节点的子节点集合中移除
+	if oldParentChildren, exists := TreeMap[oldParentID]; exists {
+		delete(oldParentChildren, id)
+	}
+
+	// 计算新父节点 ID
+	newParentID, exists := PathMap[newPPath]
+	if !exists {
+		// 如果新父节点不存在，说明是跨根目录移动或父节点已被删除
+		logger.Error("新父节点不存在", newPPath)
+		return
+	}
+	// 更新为新父节点的引用
+	node.ParentID = newParentID
+
+	// 确保新父节点的子节点集合存在并添加
+	if TreeMap[newParentID] == nil {
+		TreeMap[newParentID] = make(map[uint64]struct{})
+	}
+	TreeMap[newParentID][id] = struct{}{}
+	ChildTreeMap[id] = newParentID
+
+	// 更新父节点的 Size
+	f.UpsertParentSize(oldParentID, -node.Size) // 减去旧父节点的 size
+	f.UpsertParentSize(newParentID, node.Size)  // 加到新父节点上
+
+	Nodes[id] = node // 【新增】将更新后的节点写回
 	PathMap[newPath] = id
 
 	// 2. 处理子项
@@ -403,8 +483,9 @@ func (f *FileSystemIndex) RenameNode(oldPath string, oldName string, newPath str
 		// 3 同步更新自身的 wd 索引
 		if wd, exists := PathToWd[oldPath]; exists {
 			delete(PathToWd, oldPath)
-			PathToWd[newPath] = wd
-			WdMap[wd] = newPath
+			delete(WdMap, wd)
+
+			f.addWatch(fd, newPath)
 		}
 
 		var renameChild func(uint64)
@@ -422,14 +503,17 @@ func (f *FileSystemIndex) RenameNode(oldPath string, oldName string, newPath str
 				cPathOff, cPathlen := Store.Put(updatedPath)
 				childNode.PathOff = cPathOff
 				childNode.PathLen = cPathlen
+				Nodes[childID] = childNode // 【新增】将更新后的子节点写回
+
 				PathMap[updatedPath] = childID
 
 				// 3. 【核心优化】如果是目录，直接通过 O(1) 反向索引更新 wd 信息
 				if childNode.IsDir() {
 					if wd, exists := PathToWd[childOldPath]; exists {
 						delete(PathToWd, childOldPath)
-						PathToWd[updatedPath] = wd
-						WdMap[wd] = updatedPath
+						delete(WdMap, wd)
+
+						f.addWatch(fd, updatedPath)
 					}
 					renameChild(childID)
 				}

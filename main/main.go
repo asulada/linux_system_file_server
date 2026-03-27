@@ -18,12 +18,13 @@ var (
 )
 
 type Config struct {
-	Log       logConfig.LogConfig
-	Roots     []string
-	DumpPath  string
-	Account   string
-	Password  string
-	JwtSecret string `mapstructure:"jwtSecret"`
+	Log           logConfig.LogConfig
+	Roots         []string
+	DumpPath      string
+	Account       string
+	Password      string
+	JwtSecret     string `mapstructure:"jwtSecret"`
+	excludeSuffix []string
 }
 
 func initLog() *zap.SugaredLogger {

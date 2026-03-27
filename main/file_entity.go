@@ -11,7 +11,7 @@ const (
 	IndexMagic   = "IDX-GO125" // 魔数，标识文件类型
 	IndexVersion = 1           // 版本号，结构变更时升级
 	watchMask    = unix.IN_MODIFY | unix.IN_CREATE | unix.IN_DELETE |
-		unix.IN_MOVE | unix.IN_ATTRIB | unix.IN_DELETE_SELF | unix.IN_MOVE_SELF
+		unix.IN_MOVE | unix.IN_ATTRIB | unix.IN_DELETE_SELF
 )
 
 // FileNode 存储在内存中的详细信息
@@ -45,9 +45,10 @@ func SetRealID(id uint64, isDir bool) uint64 {
 }
 
 type MoveEvent struct {
-	OldPath string
-	OldName string
-	Expiry  time.Time
+	OldPath  string
+	OldName  string
+	OldPPath string
+	Expiry   time.Time
 }
 
 var (

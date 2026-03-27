@@ -8,10 +8,17 @@ log:
   isstdout: true
 
 roots:
-  - /root/2
-  - /root/5
-
+  - /root/go/2
+  - /root/go/5
+excludeSuffix:
+  - .log
+  - .torrent
+  - .llc
+  - .swp
+  - .swx
+  - 4913
+  - ~
 dumpPath: ./dump
 account: admin
-password: admin123
+password: admin
 jwtSecret: your-super-secret-key-here-2024

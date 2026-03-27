@@ -64,6 +64,7 @@ func (f *FileSystemIndex) RebuildAllIndexes() {
 
 // 重置大小排序
 func (f *FileSystemIndex) RebuildSizeIndexes() {
+	logger.Info("重建大小排序")
 	defer TimeTrack(time.Now(), "RebuildSizeIndexes")
 
 	mu.Lock()
@@ -106,6 +107,8 @@ func (f *FileSystemIndex) RebuildSizeIndexes() {
 
 // 重置名称排序
 func (f *FileSystemIndex) RebuildNameIndexes() {
+	logger.Info("重建名称排序")
+
 	defer TimeTrack(time.Now(), "RebuildNameIndexes")
 
 	mu.Lock()
