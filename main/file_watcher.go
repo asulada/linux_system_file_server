@@ -378,6 +378,7 @@ func (f *FileSystemIndex) handleMoveEvent(event *unix.InotifyEvent, fullPath str
 
 	// 1. 处理移出 (FROM)
 	if (event.Mask & unix.IN_MOVED_FROM) != 0 {
+		logger.Info("目录移除", fullPath)
 		f.pendingMoves[event.Cookie] = &MoveEvent{
 			OldPath:  fullPath,
 			OldName:  fileName,
@@ -402,11 +403,12 @@ func (f *FileSystemIndex) handleMoveEvent(event *unix.InotifyEvent, fullPath str
 	// 2. 处理移入 (TO)
 	if (event.Mask & unix.IN_MOVED_TO) != 0 {
 		if move, exists := f.pendingMoves[event.Cookie]; exists {
+			logger.Info("目录移动", fullPath)
 			// 【核心优化】匹配成功：执行重命名而不是删除再新建
 			delete(f.pendingMoves, event.Cookie)
 			f.RenameNode(move.OldPath, move.OldName, fullPath, fileName, fd, move.OldPPath, pPath)
 		} else {
-
+			logger.Info("目录移入", fullPath)
 			if isDir {
 				f.UpsertDir(fullPath, fileName, filepath.Dir(fullPath), time.Now())
 				f.addWatch(fd, fullPath)
