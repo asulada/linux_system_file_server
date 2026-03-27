@@ -61,13 +61,13 @@ func (f *FileSystemIndex) Search(req SearchReq) []*SearchResult {
 
 	// 2. 遍历索引向量 (Everything 的核心搜索逻辑)
 	for index, nodeIdx := range *targetIdx {
-		logger.Info("索引: ", index, " 值 ", nodeIdx)
+		//logger.Info("索引: ", index, " 值 ", nodeIdx)
 		if index >= req.Offset {
 			node, exists := Nodes[nodeIdx]
 			if !exists {
 				continue // 发现 ID 已不在主表，说明被删了，跳过
 			}
-			logger.Infof("遍历: %s", Store.Get(node.NameOff, node.NameLen))
+			//logger.Infof("遍历: %s", Store.Get(node.NameOff, node.NameLen))
 			// 关键词匹配
 			name := Store.Get(node.NameOff, node.NameLen)
 			if matchKeywords(&name, &req.Keywords) {

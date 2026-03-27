@@ -264,44 +264,71 @@ func (f *FileSystemIndex) Remove(path string, isDir bool) {
 
 	var walkDelete func(uint64)
 	walkDelete = func(currID uint64) {
-		// 递归清理：直接遍历 Map 的 Key
+		// 先获取节点信息，后面会用到
+		node, nodeExists := Nodes[currID]
+		if !nodeExists {
+			// 节点不存在，直接清理集合
+			delete(TreeMap, currID)
+			delete(ChildTreeMap, currID)
+			return
+		}
+
+		// 1. 递归清理所有子节点
 		for childID := range TreeMap[currID] {
 			walkDelete(childID)
 		}
 
-		delete(ChildTreeMap, currID)
-		if node, exists := Nodes[currID]; exists {
-			curPath := Store.Get(node.PathOff, node.PathLen)
-			delete(PathMap, curPath)
-			delete(Nodes, currID)
-			f.UpsertParentSize(currID, -node.Size)
+		// 2. 获取路径并清理索引
+		curPath := Store.Get(node.PathOff, node.PathLen)
+		delete(PathMap, curPath)
 
-			// 【新增】清理 WdMap 和 PathToWd
-			if wd, exists := PathToWd[curPath]; exists {
-				delete(WdMap, wd)
-				delete(PathToWd, curPath)
-			}
+		// 3. 清理 WdMap 和 PathToWd
+		if wd, exists := PathToWd[curPath]; exists {
+			delete(WdMap, wd)
+			delete(PathToWd, curPath)
 		}
-		// 清理整个集合
+
+		// 4. 更新父节点的 Size（在删除 ChildTreeMap 之前调用）
+		//f.UpsertParentSize(currID, -node.Size)
+
+		// 5. 删除父子关系
+		delete(ChildTreeMap, currID)
 		delete(TreeMap, currID)
+
+		// 6. 最后删除节点本身
+		delete(Nodes, currID)
 	}
 
 	if isDir {
+		// 获取要删除的目录节点
+		node := Nodes[id]
+		// 【核心修复】只在最外层更新一次父节点的 Size
+		f.UpsertParentSize(id, -node.Size)
+		// 递归删除所有子节点（不更新父节点 Size）
 		walkDelete(id)
 	} else {
 		// 单个文件删除：O(1) 移除父子关系
 		if node, exists := Nodes[id]; exists {
+			// 从父节点的子节点集合中移除
 			if children, ok := TreeMap[node.ParentID]; ok {
 				delete(children, id) // O(1) 操作
+
+				// 更新父节点的 Size
 				f.UpsertParentSize(id, -node.Size)
 			}
+
+			// 清理 PathMap 和 Nodes
+			delete(PathMap, path)
+			delete(Nodes, id)
+
+			// 清理反向索引
+			delete(ChildTreeMap, id)
+
+			// 确保清理空的子节点集合（理论上文件不应该有子节点）
+			delete(TreeMap, id)
 		}
-		delete(ChildTreeMap, id)
-		delete(PathMap, path)
-		delete(Nodes, id)
 	}
 }
-
 func (f *FileSystemIndex) ignoreSuffix(name string) bool {
 	//判断字符串结尾是否以 .swp结尾
 	for _, suffix := range selfConfig.excludeSuffix {
@@ -365,9 +392,9 @@ func (f *FileSystemIndex) runEventLoop(fd int) {
 func (f *FileSystemIndex) addWatch(fd int, fullPath string) {
 	wd, _ := unix.InotifyAddWatch(fd, fullPath, watchMask)
 	mu.Lock()
+	defer mu.Unlock()
 	WdMap[wd] = fullPath
 	PathToWd[fullPath] = wd
-	mu.Unlock()
 }
 
 // 监听 移动事件
@@ -410,8 +437,11 @@ func (f *FileSystemIndex) handleMoveEvent(event *unix.InotifyEvent, fullPath str
 		} else {
 			logger.Info("目录移入", fullPath)
 			if isDir {
-				f.UpsertDir(fullPath, fileName, filepath.Dir(fullPath), time.Now())
-				f.addWatch(fd, fullPath)
+				//f.UpsertDir(fullPath, fileName, filepath.Dir(fullPath), time.Now())
+				//f.addWatch(fd, fullPath)
+				pathChan := make(chan string, 1000)
+				go f.ParallelBFSScan([]string{fullPath}, pathChan)
+				f.setupWatches(fd, pathChan)
 
 			} else {
 				// 如果没匹配到 Cookie，说明是从外部移入，执行新增
@@ -423,11 +453,21 @@ func (f *FileSystemIndex) handleMoveEvent(event *unix.InotifyEvent, fullPath str
 	}
 }
 
+// addWatchLocked 内部版本：假设调用者已经持有 mu 锁
+func (f *FileSystemIndex) addWatchLocked(fd int, fullPath string) {
+	wd, _ := unix.InotifyAddWatch(fd, fullPath, watchMask)
+	WdMap[wd] = fullPath
+	PathToWd[fullPath] = wd
+}
+
 // O(1) 路径重命名 (RenameNode)
 // 由于我们存储了全路径，重命名时只需修改对应的 Node。如果是目录，则需要级联修改其下所有子项的路径前缀。
 func (f *FileSystemIndex) RenameNode(oldPath string, oldName string, newPath string, newName string, fd int, oldPPath string, newPPath string) {
 	mu.Lock()
-	defer mu.Unlock()
+	defer func() {
+		mu.Unlock()
+		logger.Info("RenameNode: 已释放 mu 锁", "oldPath", oldPath, "newPath", newPath)
+	}()
 
 	id, ok := PathMap[oldPath]
 	if !ok {
@@ -449,6 +489,9 @@ func (f *FileSystemIndex) RenameNode(oldPath string, oldName string, newPath str
 	node.NameLen = nLen
 	node.PathOff = pOff
 	node.PathLen = pLen
+
+	// 更新父节点的 Size
+	f.UpsertParentSize(id, -node.Size) // 减去旧父节点的 size
 
 	// 2. 更新父子关系
 	// 从旧父节点的子节点集合中移除
@@ -473,10 +516,6 @@ func (f *FileSystemIndex) RenameNode(oldPath string, oldName string, newPath str
 	TreeMap[newParentID][id] = struct{}{}
 	ChildTreeMap[id] = newParentID
 
-	// 更新父节点的 Size
-	f.UpsertParentSize(oldParentID, -node.Size) // 减去旧父节点的 size
-	f.UpsertParentSize(newParentID, node.Size)  // 加到新父节点上
-
 	Nodes[id] = node // 【新增】将更新后的节点写回
 	PathMap[newPath] = id
 
@@ -487,7 +526,7 @@ func (f *FileSystemIndex) RenameNode(oldPath string, oldName string, newPath str
 			delete(PathToWd, oldPath)
 			delete(WdMap, wd)
 
-			f.addWatch(fd, newPath)
+			f.addWatchLocked(fd, newPath)
 		}
 
 		var renameChild func(uint64)
@@ -515,7 +554,7 @@ func (f *FileSystemIndex) RenameNode(oldPath string, oldName string, newPath str
 						delete(PathToWd, childOldPath)
 						delete(WdMap, wd)
 
-						f.addWatch(fd, updatedPath)
+						f.addWatchLocked(fd, updatedPath)
 					}
 					renameChild(childID)
 				}
@@ -523,5 +562,6 @@ func (f *FileSystemIndex) RenameNode(oldPath string, oldName string, newPath str
 		}
 		renameChild(id)
 	}
+	f.UpsertParentSize(id, node.Size) // 加到新父节点上
 	nameSort = true
 }
