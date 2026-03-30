@@ -114,5 +114,6 @@ func (f *FileSystemIndex) Load(filePath string) error {
 			lastID = id
 		}
 	}
+	logger.Info("加载索引完成")
 	return nil
 }

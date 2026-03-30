@@ -26,6 +26,9 @@ func (ss *StringStore) Get(off uint32, len uint16) string {
 }
 
 func (ss *StringStore) Compact() {
+	mu.Lock()
+	defer mu.Unlock()
+
 	ss.mu.RLock()
 	defer ss.mu.RUnlock()
 

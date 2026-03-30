@@ -67,9 +67,6 @@ func (f *FileSystemIndex) RebuildSizeIndexes() {
 	//logger.Info("重建大小排序")
 	defer TimeTrack(time.Now(), "RebuildSizeIndexes")
 
-	mu.Lock()
-	defer mu.Unlock()
-
 	count := uint64(len(Nodes))
 
 	// 初始化索引向量
@@ -111,12 +108,12 @@ func (f *FileSystemIndex) RebuildNameIndexes() {
 
 	defer TimeTrack(time.Now(), "RebuildNameIndexes")
 
-	locked := mu.TryLock()
-	if !locked {
-		logger.Warn("无法获取 mu 锁")
-		return
-	}
-	defer mu.Unlock()
+	//locked := mu.TryLock()
+	//if !locked {
+	//	logger.Warn("无法获取 mu 锁")
+	//	return
+	//}
+	//defer mu.Unlock()
 	logger.Info("成功获取 mu 锁")
 	logger.Info("node 长度", len(Nodes))
 	count := uint64(len(Nodes))
