@@ -22,6 +22,8 @@ type FileNode struct {
 	Size    int64
 	ModTime int64
 	//IsDir   bool
+	//是否无效文件
+	Invalid bool
 
 	// 指向字节块的偏移量和长度
 	NameOff uint32
@@ -37,9 +39,11 @@ func (n *FileNode) IsDir() bool       { return n.ID&IsDirMask != 0 }
 func (n *FileNode) GetRealID() uint64 { return n.ID &^ IsDirMask }
 
 func SetRealID(id uint64, isDir bool) uint64 {
+	logger.Info("需要设置ID: ", id, " 是否是目录: ", isDir)
 	if isDir {
 		id |= IsDirMask // 只在是目录时设置标志位
 	}
+	logger.Info("设置真实ID: ", id)
 	// 是文件时什么都不做，因为 realID 最高位本来就是 0
 	return id
 }
@@ -68,8 +72,8 @@ var (
 	SizeIdx []uint64 // 按大小排序
 	NameIdx []uint64 // 按名称排序
 
-	sizeSort bool
-	nameSort bool
+	SizeSort bool
+	NameSort bool
 
 	Store = &StringStore{} // ✅ 初始化为空实例
 )

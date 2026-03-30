@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +21,8 @@ func (f *FileSystemIndex) Start(roots []string, storagePath string) {
 
 	pathChan := make(chan string, 1000)
 	//加载到数据
+	logger.Info("node 长度 : ", len(Nodes))
+
 	if err == nil && len(Nodes) > 0 {
 		logger.Info("热启动：正在从内存恢复监听...")
 		go func() {
@@ -36,13 +37,17 @@ func (f *FileSystemIndex) Start(roots []string, storagePath string) {
 			close(pathChan)
 		}()
 	} else {
+		logger.Info("node 长度 : ", len(Nodes))
+
 		logger.Info("冷启动：正在遍历磁盘初始化...")
 		go f.ParallelBFSScan(roots, pathChan)
 	}
 
 	f.setupWatches(fd, pathChan)
+	logger.Info("node 长度 : ", len(Nodes))
+
 	go f.runEventLoop(fd)
-	go f.StartPersistenceTask(context.Background(), storagePath)
+	//go f.StartPersistenceTask(context.Background(), storagePath)
 }
 
 // 1.1 ParallelBFSScan 广度优先扫描，确保父节点先于子节点入库
@@ -73,6 +78,7 @@ func (f *FileSystemIndex) ParallelBFSScan(roots []string, pathChan chan<- string
 							logger.Info("广度优先扫描：发现子目录", fullPath)
 							info, _ := os.Stat(fullPath)
 							f.UpsertDir(fullPath, entry.Name(), path, info.ModTime())
+							logger.Info("node 长度 : ", len(Nodes))
 
 							enqueueWg.Add(1)
 							workQueue <- fullPath
@@ -94,6 +100,8 @@ func (f *FileSystemIndex) ParallelBFSScan(roots []string, pathChan chan<- string
 			continue
 		}
 		f.UpsertDir(root, info.Name(), filepath.Dir(root), info.ModTime())
+		logger.Info("node 长度 : ", len(Nodes))
+
 		enqueueWg.Add(1)
 		workQueue <- root
 		globalWg.Add(1)
@@ -190,8 +198,8 @@ func (f *FileSystemIndex) Upsert(path string) {
 	ChildTreeMap[id] = parentID
 
 	f.UpsertParentSize(id, info.Size())
-	sizeSort = true
-	nameSort = true
+	SizeSort = true
+	NameSort = true
 }
 func (f *FileSystemIndex) UpsertParentSize(childId uint64, size int64) {
 	// 更新父节点的 Size
@@ -248,8 +256,8 @@ func (f *FileSystemIndex) UpsertDir(fullPath string, name string, parentPath str
 	TreeMap[parentID][id] = struct{}{}
 	ChildTreeMap[id] = parentID
 
-	sizeSort = true
-	nameSort = true
+	SizeSort = true
+	NameSort = true
 
 }
 
@@ -563,5 +571,5 @@ func (f *FileSystemIndex) RenameNode(oldPath string, oldName string, newPath str
 		renameChild(id)
 	}
 	f.UpsertParentSize(id, node.Size) // 加到新父节点上
-	nameSort = true
+	NameSort = true
 }

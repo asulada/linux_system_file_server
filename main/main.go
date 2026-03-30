@@ -7,14 +7,19 @@ import (
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 	"net/http"
+	"os"
+	"regexp"
+	"sync/atomic"
 	jwt "system_file_server/auth"
 	logConfig "system_file_server/logger"
+	"time"
 )
 
 var (
 	logger     *zap.SugaredLogger
 	selfConfig Config
 	fileSystem *FileSystemIndex
+	re         = regexp.MustCompile(`^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$`)
 )
 
 type Config struct {
@@ -63,6 +68,12 @@ func initConfig() {
 	if err := v.Unmarshal(&selfConfig); err != nil {
 		logger.Error("err", err)
 	}
+}
+
+func moveChar(name *string) *string {
+	// 使用正则表达式去除两边的符号，只保留字母、数字和其他语言文字
+	nameStr := re.ReplaceAllString(*name, "")
+	return &nameStr
 }
 
 // 自定义 BasicAuth 中间件
@@ -140,6 +151,74 @@ func search(c *gin.Context) {
 
 }
 
+func create(context *gin.Context) {
+	reqBody := getJson(context)
+	name := reqBody["name"]
+	nameStr := name.(string)
+	saveName(*moveChar(&nameStr))
+	OkResponse(context, http.StatusOK, "保存成功", nil)
+}
+func saveName(name string) {
+	mu.Lock()
+	defer mu.Unlock()
+	id := atomic.AddUint64(&lastID, 1)
+	nOff, nLen := Store.Put(name)
+	node := FileNode{
+		ID: id, ParentID: 0,
+		Size: 0, ModTime: time.Now().Unix(),
+		NameOff: nOff,
+		NameLen: nLen,
+		PathOff: 0,
+		PathLen: 0,
+		Invalid: true,
+	}
+	Nodes[id] = node
+	NameSort = true
+}
+
+func deleteFile(context *gin.Context) {
+	reqBody := getJson(context)
+	path := reqBody["path"]
+	pathStr := path.(string)
+	info, err := os.Stat(pathStr)
+	if err != nil {
+		OkResponse(context, http.StatusInternalServerError, "获取文件信息出错", nil)
+		return
+	}
+	if info.IsDir() {
+		err = os.RemoveAll(pathStr)
+	} else {
+		err = os.Remove(pathStr)
+	}
+	if err != nil {
+		OkResponse(context, http.StatusInternalServerError, "删除错误", err)
+		logger.Error(err)
+		return
+	}
+	SendResponse(context, http.StatusOK, "删除成功", err)
+}
+func deleteInvalid(context *gin.Context) {
+	reqBody := getJson(context)
+	id := reqBody["id"]
+	mu.Lock()
+	defer mu.Unlock()
+	// 【修复】将 float64 转换为 uint64
+	var nodeID uint64
+	switch v := id.(type) {
+	case float64:
+		nodeID = uint64(v)
+	case uint64:
+		nodeID = v
+	default:
+		logger.Error("无效的 ID 类型", id)
+		SendResponse(context, http.StatusBadRequest, "无效的 ID 类型", nil)
+		return
+	}
+
+	delete(Nodes, nodeID)
+	SendResponse(context, http.StatusOK, "删除成功", nil)
+}
+
 func main() {
 	initConfig()
 	logger = initLog()
@@ -163,6 +242,10 @@ func main() {
 		//访问地址，处理我们的请求 Request Response
 		files.POST("/login", login)
 		files.POST("/search", BasicAuthMiddleware(), search)
+		files.POST("/create", BasicAuthMiddleware(), create)
+		files.POST("/delete", BasicAuthMiddleware(), deleteFile)
+		files.POST("/deleteInvalid", BasicAuthMiddleware(), deleteInvalid)
+
 	}
 	logger.Info("9102端口启动成功")
 	//服务器端口

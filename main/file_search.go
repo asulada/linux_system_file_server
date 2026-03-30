@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"strings"
 )
 
@@ -19,6 +20,7 @@ type SearchResult struct {
 	Path    string `json:"path"`
 	ModTime int64  `json:"modTime"`
 	IsDir   bool   `json:"isDir"`
+	Invalid bool   `json:"invalid"`
 }
 
 func NewSeachResult(name *string, node *FileNode) *SearchResult {
@@ -29,6 +31,7 @@ func NewSeachResult(name *string, node *FileNode) *SearchResult {
 		Path:    Store.Get(node.PathOff, node.PathLen),
 		ModTime: node.ModTime,
 		IsDir:   node.IsDir(),
+		Invalid: node.Invalid,
 	}
 }
 
@@ -39,17 +42,18 @@ func (f *FileSystemIndex) Search(req SearchReq) []*SearchResult {
 	//defer f.mu.RUnlock()
 
 	// 1. 选择索引向量
+	logger.Info("node 长度 : ", len(Nodes))
 	var targetIdx *[]uint64
 	switch req.SortBy {
 	case "size":
-		if sizeSort {
+		if SizeSort {
 			f.RebuildSizeIndexes()
 		}
 		targetIdx = &SizeIdx
 	case "time":
 		targetIdx = &TimeIdx
 	default:
-		if nameSort {
+		if NameSort {
 			f.RebuildNameIndexes()
 		}
 		targetIdx = &NameIdx
@@ -61,7 +65,7 @@ func (f *FileSystemIndex) Search(req SearchReq) []*SearchResult {
 
 	// 2. 遍历索引向量 (Everything 的核心搜索逻辑)
 	for index, nodeIdx := range *targetIdx {
-		//logger.Info("索引: ", index, " 值 ", nodeIdx)
+		logger.Info("索引: ", index, " 值 ", nodeIdx)
 		if index >= req.Offset {
 			node, exists := Nodes[nodeIdx]
 			if !exists {
@@ -70,6 +74,12 @@ func (f *FileSystemIndex) Search(req SearchReq) []*SearchResult {
 			//logger.Infof("遍历: %s", Store.Get(node.NameOff, node.NameLen))
 			// 关键词匹配
 			name := Store.Get(node.NameOff, node.NameLen)
+			logger.Infof("匹配: %s", name)
+			if data, err := json.Marshal(node); err != nil {
+				logger.Error("序列化失败", err)
+			} else {
+				logger.Info("内容", string(data))
+			}
 			if matchKeywords(&name, &req.Keywords) {
 				//matchCount++
 				//if matchCount > req.Offset {
@@ -86,7 +96,7 @@ func (f *FileSystemIndex) Search(req SearchReq) []*SearchResult {
 
 func matchKeywords(fileName *string, keywords *[]string) bool {
 	for _, keyword := range *keywords {
-		if !strings.Contains(*fileName, keyword) {
+		if !strings.Contains(strings.ToLower(*fileName), keyword) {
 			return false
 		}
 	}
