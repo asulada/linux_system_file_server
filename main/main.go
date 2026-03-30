@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/gin-gonic/gin"
@@ -153,9 +154,17 @@ func search(c *gin.Context) {
 
 func create(context *gin.Context) {
 	reqBody := getJson(context)
-	name := reqBody["name"]
-	nameStr := name.(string)
-	saveName(*moveChar(&nameStr))
+	names := reqBody["names"]
+
+	nameSlice, err := convertToStringSlice(names)
+	if err != nil {
+		OkResponse(context, http.StatusBadRequest, "参数错误："+err.Error(), nil)
+		return
+	}
+
+	for _, nameStr := range nameSlice {
+		saveName(*moveChar(&nameStr))
+	}
 	OkResponse(context, http.StatusOK, "保存成功", nil)
 }
 func saveName(name string) {
@@ -172,8 +181,36 @@ func saveName(name string) {
 		PathLen: 0,
 		Invalid: true,
 	}
-	Nodes[id] = node
+	SetNode(&node)
 	NameSort = true
+}
+
+func exportInvalid(context *gin.Context) {
+
+	var invalidNodes []string
+	for _, node := range Nodes {
+		if node.Invalid {
+			name := Store.Get(node.NameOff, node.NameLen)
+			invalidNodes = append(invalidNodes, name)
+		}
+	}
+
+	jsonData, err := json.MarshalIndent(gin.H{
+		"count": len(invalidNodes),
+		"data":  invalidNodes,
+	}, "", "  ")
+	if err != nil {
+		logger.Error("JSON 序列化失败", err)
+		SendResponse(context, http.StatusInternalServerError, "导出失败", nil)
+		return
+	}
+	filename := fmt.Sprintf("invalid_nodes_%s.json", time.Now().Format("20060102_150405"))
+
+	context.Header("Content-Description", "File Transfer")
+	context.Header("Content-Transfer-Encoding", "binary")
+	context.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+	context.Header("Content-Type", "application/json")
+	context.Data(http.StatusOK, "application/json", jsonData)
 }
 
 func deleteFile(context *gin.Context) {
@@ -245,7 +282,7 @@ func main() {
 		files.POST("/create", BasicAuthMiddleware(), create)
 		files.POST("/delete", BasicAuthMiddleware(), deleteFile)
 		files.POST("/deleteInvalid", BasicAuthMiddleware(), deleteInvalid)
-
+		files.POST("/exportInvalid", BasicAuthMiddleware(), exportInvalid)
 	}
 	logger.Info("9102端口启动成功")
 	//服务器端口
