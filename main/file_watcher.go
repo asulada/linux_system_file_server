@@ -152,7 +152,7 @@ func (f *FileSystemIndex) Upsert(path string) {
 		node.ModTime = info.ModTime().Unix()
 
 		f.UpsertParentSize(id, node.Size-oldSize)
-		Nodes[id] = node
+		SetNode(&node)
 		return
 	}
 
@@ -167,7 +167,7 @@ func (f *FileSystemIndex) Upsert(path string) {
 	pOff, pLen := Store.Put(path)
 	nOff, nLen := Store.Put(info.Name())
 
-	node := FileNode{
+	node := &FileNode{
 		ID: id, ParentID: parentID,
 		Size: info.Size(), ModTime: info.ModTime().Unix(),
 		NameOff: nOff,
@@ -176,7 +176,7 @@ func (f *FileSystemIndex) Upsert(path string) {
 		PathLen: pLen,
 	}
 
-	Nodes[id] = node
+	SetNode(node)
 	PathMap[path] = id
 
 	// 1. 获取或创建 Parent 的子节点集合
@@ -199,7 +199,7 @@ func (f *FileSystemIndex) UpsertParentSize(childId uint64, size int64) {
 		if parentID, ok := ChildTreeMap[childId]; ok {
 			parentNode := Nodes[parentID]
 			parentNode.Size += size
-			Nodes[parentID] = parentNode
+			SetNode(&parentNode)
 			childId = parentID
 		} else {
 			return
@@ -236,7 +236,7 @@ func (f *FileSystemIndex) UpsertDir(fullPath string, name string, parentPath str
 		PathLen: pLen,
 	}
 
-	Nodes[id] = *node
+	SetNode(node)
 	PathMap[fullPath] = id
 
 	// 1. 获取或创建 Parent 的子节点集合
@@ -513,7 +513,7 @@ func (f *FileSystemIndex) RenameNode(oldPath string, oldName string, newPath str
 	TreeMap[newParentID][id] = struct{}{}
 	ChildTreeMap[id] = newParentID
 
-	Nodes[id] = node // 【新增】将更新后的节点写回
+	SetNode(&node)
 	PathMap[newPath] = id
 
 	// 2. 处理子项
@@ -541,8 +541,7 @@ func (f *FileSystemIndex) RenameNode(oldPath string, oldName string, newPath str
 				cPathOff, cPathlen := Store.Put(updatedPath)
 				childNode.PathOff = cPathOff
 				childNode.PathLen = cPathlen
-				Nodes[childID] = childNode // 【新增】将更新后的子节点写回
-
+				SetNode(&childNode)
 				PathMap[updatedPath] = childID
 
 				// 3. 【核心优化】如果是目录，直接通过 O(1) 反向索引更新 wd 信息

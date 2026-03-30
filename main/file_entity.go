@@ -47,6 +47,9 @@ func SetRealID(id uint64, isDir bool) uint64 {
 	// 是文件时什么都不做，因为 realID 最高位本来就是 0
 	return id
 }
+func SetNode(node *FileNode) {
+	Nodes[node.ID] = *node
+}
 
 type MoveEvent struct {
 	OldPath  string

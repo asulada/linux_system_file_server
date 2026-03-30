@@ -33,7 +33,7 @@ func (ss *StringStore) Compact() {
 	newStore := make([]byte, 0, len(Store.Data))
 
 	// 2. 遍历当前所有活跃节点，重写偏移量
-	for id, node := range Nodes {
+	for _, node := range Nodes {
 		// 提取旧字符串
 		oldName := Store.Get(node.NameOff, node.NameLen)
 		oldPath := Store.Get(node.PathOff, node.PathLen)
@@ -48,7 +48,7 @@ func (ss *StringStore) Compact() {
 		// 更新内存中的节点信息
 		node.NameOff = newNameOff
 		node.PathOff = newPathOff
-		Nodes[id] = node
+		SetNode(&node)
 	}
 
 	// 3. 替换旧块
