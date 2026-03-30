@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,7 +42,7 @@ func (f *FileSystemIndex) Start(roots []string, storagePath string) {
 
 	f.setupWatches(fd, pathChan)
 	go f.runEventLoop(fd)
-	//go f.StartPersistenceTask(context.Background(), storagePath)
+	go f.StartPersistenceTask(context.Background(), storagePath)
 }
 
 // 1.1 ParallelBFSScan 广度优先扫描，确保父节点先于子节点入库
