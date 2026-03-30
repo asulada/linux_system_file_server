@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"strings"
 )
 
@@ -76,12 +75,12 @@ func (f *FileSystemIndex) Search(req SearchReq) []*SearchResult {
 			//logger.Infof("遍历: %s", Store.Get(node.NameOff, node.NameLen))
 			// 关键词匹配
 			name := Store.Get(node.NameOff, node.NameLen)
-			logger.Infof("匹配: %s", name)
-			if data, err := json.Marshal(node); err != nil {
-				logger.Error("序列化失败", err)
-			} else {
-				logger.Info("内容", string(data))
-			}
+			//logger.Infof("匹配: %s", name)
+			//if data, err := json.Marshal(node); err != nil {
+			//	logger.Error("序列化失败", err)
+			//} else {
+			//	logger.Info("内容", string(data))
+			//}
 			if matchKeywords(&name, &req.Keywords) {
 				//matchCount++
 				//if matchCount > req.Offset {

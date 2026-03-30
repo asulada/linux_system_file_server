@@ -379,9 +379,11 @@ func (f *FileSystemIndex) runEventLoop(fd int) {
 				f.Remove(fullPath, isDir)
 			} else {
 				if isDir {
+					logger.Info("创建或更新目录 ", fullPath)
 					f.UpsertDir(fullPath, name, dirPath, time.Now())
 					f.addWatch(fd, fullPath)
 				} else {
+					logger.Info("创建或更新文件 ", fullPath)
 					f.Upsert(fullPath)
 				}
 			}
