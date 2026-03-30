@@ -26,6 +26,7 @@ func (f *FileSystemIndex) Start(roots []string, storagePath string) {
 		logger.Info("热启动：正在从内存恢复监听...")
 		go func() {
 			mu.RLock()
+			defer mu.RUnlock()
 			for path, id := range PathMap {
 				node := Nodes[id]
 				if node.IsDir() {
@@ -34,6 +35,7 @@ func (f *FileSystemIndex) Start(roots []string, storagePath string) {
 			}
 			mu.RUnlock()
 			close(pathChan)
+			logger.Info("热启动：完成")
 		}()
 	} else {
 		logger.Info("冷启动：正在遍历磁盘初始化...")
@@ -94,7 +96,6 @@ func (f *FileSystemIndex) ParallelBFSScan(roots []string, pathChan chan<- string
 			continue
 		}
 		f.UpsertDir(root, info.Name(), filepath.Dir(root), info.ModTime())
-
 		enqueueWg.Add(1)
 		workQueue <- root
 		globalWg.Add(1)
@@ -132,6 +133,7 @@ func (f *FileSystemIndex) setupWatches(fd int, paths <-chan string) {
 		}()
 	}
 	wg.Wait()
+	logger.Info("所有目录已添加监听")
 }
 
 // 3. Searcher 核心逻辑：Upsert 与级联删除
@@ -198,6 +200,9 @@ func (f *FileSystemIndex) UpsertParentSize(childId uint64, size int64) {
 	// 更新父节点的 Size
 	for true {
 		if parentID, ok := ChildTreeMap[childId]; ok {
+			if childId == 0 {
+				return
+			}
 			parentNode := Nodes[parentID]
 			parentNode.Size += size
 			SetNode(&parentNode)

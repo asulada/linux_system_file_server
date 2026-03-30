@@ -37,8 +37,8 @@ func NewSeachResult(name *string, node *FileNode) *SearchResult {
 // SearchPaged 分页多关键词搜索
 
 func (f *FileSystemIndex) Search(req SearchReq) []*SearchResult {
-	//f.mu.RLock()
-	//defer f.mu.RUnlock()
+	mu.RLock()
+	defer mu.RUnlock()
 
 	// 1. 选择索引向量
 	var targetIdx *[]uint64
@@ -57,7 +57,7 @@ func (f *FileSystemIndex) Search(req SearchReq) []*SearchResult {
 		targetIdx = &NameIdx
 	}
 
-	logger.Info("索引长度 ", len(*targetIdx))
+	//logger.Info("索引长度 ", len(*targetIdx))
 	results := make([]*SearchResult, 0)
 	//matchCount := 0
 
