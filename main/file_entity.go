@@ -39,11 +39,11 @@ func (n *FileNode) IsDir() bool       { return n.ID&IsDirMask != 0 }
 func (n *FileNode) GetRealID() uint64 { return n.ID &^ IsDirMask }
 
 func SetRealID(id uint64, isDir bool) uint64 {
-	logger.Info("需要设置ID: ", id, " 是否是目录: ", isDir)
+	//logger.Info("需要设置ID: ", id, " 是否是目录: ", isDir)
 	if isDir {
 		id |= IsDirMask // 只在是目录时设置标志位
 	}
-	logger.Info("设置真实ID: ", id)
+	//logger.Info("设置真实ID: ", id)
 	// 是文件时什么都不做，因为 realID 最高位本来就是 0
 	return id
 }
