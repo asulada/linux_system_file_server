@@ -62,6 +62,9 @@ func (f *FileSystemIndex) Search(req SearchReq) []*SearchResult {
 	// 2. 遍历索引向量 (Everything 的核心搜索逻辑)
 	for index, nodeIdx := range *targetIdx {
 		//logger.Info("索引: ", index, " 值 ", nodeIdx)
+		if nodeIdx == 0 {
+			continue
+		}
 		if index >= req.Offset {
 			node, exists := Nodes[nodeIdx]
 			if !exists {
