@@ -22,6 +22,11 @@ type SearchResult struct {
 	Invalid bool   `json:"invalid"`
 }
 
+type SearchRes struct {
+	Results []*SearchResult `json:"results"`
+	Offset  int             `json:"offset"`
+}
+
 func NewSeachResult(name *string, node *FileNode) *SearchResult {
 	return &SearchResult{
 		ID:      node.GetRealID(),
@@ -36,7 +41,7 @@ func NewSeachResult(name *string, node *FileNode) *SearchResult {
 
 // SearchPaged 分页多关键词搜索
 
-func (f *FileSystemIndex) Search(req SearchReq) []*SearchResult {
+func (f *FileSystemIndex) Search(req SearchReq) *SearchRes {
 	mu.RLock()
 	defer mu.RUnlock()
 
@@ -60,14 +65,14 @@ func (f *FileSystemIndex) Search(req SearchReq) []*SearchResult {
 	//logger.Info("索引长度 ", len(*targetIdx))
 	results := make([]*SearchResult, 0)
 	//matchCount := 0
-
+	var searchRes SearchRes
 	// 2. 遍历索引向量 (Everything 的核心搜索逻辑)
 	for index, nodeIdx := range *targetIdx {
 		//logger.Info("索引: ", index, " 值 ", nodeIdx)
 		if nodeIdx == 0 {
 			continue
 		}
-		if index >= req.Offset {
+		if index > req.Offset {
 			node, exists := Nodes[nodeIdx]
 			if !exists {
 				continue // 发现 ID 已不在主表，说明被删了，跳过
@@ -87,12 +92,14 @@ func (f *FileSystemIndex) Search(req SearchReq) []*SearchResult {
 				results = append(results, NewSeachResult(&name, &node))
 				//}
 				if len(results) >= req.Limit {
+					searchRes.Offset = index
 					break // 达标即止，极速响应
 				}
 			}
 		}
 	}
-	return results
+	searchRes.Results = results
+	return &searchRes
 }
 
 func matchKeywords(fileName *string, keywords *[]string) bool {
