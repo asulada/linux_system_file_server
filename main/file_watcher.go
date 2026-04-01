@@ -33,7 +33,6 @@ func (f *FileSystemIndex) Start(roots []string, storagePath string) {
 					pathChan <- path
 				}
 			}
-			mu.RUnlock()
 			close(pathChan)
 			logger.Info("热启动：完成")
 		}()
