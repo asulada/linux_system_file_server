@@ -394,7 +394,7 @@ func (f *FileSystemIndex) Remove(path string, isDir bool) {
 }
 func (f *FileSystemIndex) ignoreSuffix(name string) bool {
 	//判断字符串结尾是否以 .swp结尾
-	for _, suffix := range selfConfig.excludeSuffix {
+	for _, suffix := range selfConfig.ExcludeSuffix {
 		if strings.HasSuffix(name, suffix) {
 			return true
 		}
@@ -417,15 +417,19 @@ func (f *FileSystemIndex) runEventLoop(fd int) {
 				logger.Warn("警告：接收到无效的 inotify 事件")
 				continue
 			}
-			dirPath := GetWdPath(int(event.Wd))
-
-			isDir := (mask & unix.IN_ISDIR) != 0
-
 			name := unix.ByteSliceToString(buf[offset+unix.SizeofInotifyEvent : offset+unix.SizeofInotifyEvent+event.Len])
 
+			offset += unix.SizeofInotifyEvent + event.Len
+
+			if name == "" || name == "." || name == ".." {
+				continue
+			}
 			if f.ignoreSuffix(name) {
 				continue
 			}
+
+			dirPath := GetWdPath(int(event.Wd))
+			isDir := (mask & unix.IN_ISDIR) != 0
 			fullPath := filepath.Join(dirPath, name)
 
 			if mask&(unix.IN_MOVED_FROM|unix.IN_MOVED_TO) != 0 {
@@ -447,7 +451,6 @@ func (f *FileSystemIndex) runEventLoop(fd int) {
 					f.Upsert(fullPath)
 				}
 			}
-			offset += unix.SizeofInotifyEvent + event.Len
 		}
 	}
 }
