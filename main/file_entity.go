@@ -60,8 +60,7 @@ var (
 	Nodes   = make(map[uint64]FileNode, 200000)
 	PathMap = make(map[string]uint64, 200000)
 	// 修改为嵌套 Map：ParentID -> {ChildID: struct{}}
-	TreeMap = make(map[uint64]map[uint64]struct{}, 50000)
-
+	TreeMap      = make(map[uint64]map[uint64]struct{}, 50000)
 	ChildTreeMap = make(map[uint64]uint64, 50000)
 
 	wdMu     sync.RWMutex

@@ -114,7 +114,6 @@ func (f *FileSystemIndex) doProcess(path string, taskQueue chan string, scanChan
 
 	for _, entry := range entries {
 		fullPath := filepath.Join(path, entry.Name())
-
 		if entry.IsDir() {
 			info, _ := entry.Info()
 			// 发送目录数据到结果通道
@@ -138,6 +137,9 @@ func (f *FileSystemIndex) doProcess(path string, taskQueue chan string, scanChan
 				go func(p string) { taskQueue <- p }(fullPath)
 			}
 		} else {
+			if f.ignoreSuffix(entry.Name()) {
+				continue
+			}
 			// 文件直接发送结果
 			scanChan <- &ScanResult{
 				Path:  fullPath,
