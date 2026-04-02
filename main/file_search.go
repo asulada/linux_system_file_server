@@ -47,14 +47,14 @@ func (f *FileSystemIndex) Search(req SearchReq) *SearchRes {
 	var targetIdx *[]uint64
 	switch req.SortBy {
 	case "size":
-		if sizeSort {
+		if SizeSort {
 			f.RebuildSizeIndexes()
 		}
 		targetIdx = &SizeIdx
 	case "time":
 		targetIdx = &TimeIdx
 	default:
-		if nameSort {
+		if NameSort {
 			f.RebuildNameIndexes()
 		}
 		targetIdx = &NameIdx
