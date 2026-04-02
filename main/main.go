@@ -149,7 +149,6 @@ func search(c *gin.Context) {
 	logger.Info("收到 json 参数", zap.Reflect("req", req))
 	result := fileSystem.Search(req)
 	SendResponse(c, http.StatusOK, "", result)
-
 }
 
 func create(context *gin.Context) {
@@ -255,6 +254,22 @@ func deleteInvalid(context *gin.Context) {
 	delete(Nodes, nodeID)
 	SendResponse(context, http.StatusOK, "删除成功", nil)
 }
+func TimingMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+
+		c.Next()
+
+		duration := time.Since(start)
+		logger.Info("接口耗时",
+			"path", c.Request.URL.Path,
+			"method", c.Request.Method,
+			"status", c.Writer.Status(),
+			"duration", duration.String(),
+			"duration_ms", float64(duration.Nanoseconds())/1e6,
+		)
+	}
+}
 
 func main() {
 	initConfig()
@@ -268,6 +283,8 @@ func main() {
 
 	// Apply the error handling middleware
 	ginServer.Use(ErrorHandlingMiddleware())
+	ginServer.Use(TimingMiddleware())
+
 	// 自定义404错误处理
 	ginServer.NoRoute(func(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{
