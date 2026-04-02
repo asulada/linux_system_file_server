@@ -26,11 +26,11 @@ type SearchRes struct {
 	Offset  int             `json:"offset"`
 }
 
-func NewSeachResult(name *string, node *FileNode) *SearchResult {
+func NewSeachResult(name string, node *FileNode) *SearchResult {
 	return &SearchResult{
 		ID:      node.GetRealID(),
 		Size:    node.Size,
-		Name:    *name,
+		Name:    name,
 		Path:    Store.Get(node.PathOff, node.PathLen),
 		ModTime: node.ModTime,
 		IsDir:   node.IsDir(),
@@ -60,13 +60,10 @@ func (f *FileSystemIndex) Search(req SearchReq) *SearchRes {
 		targetIdx = &NameIdx
 	}
 
-	//logger.Info("索引长度 ", len(*targetIdx))
-	results := make([]*SearchResult, 0)
-	//matchCount := 0
+	results := make([]*SearchResult, 0, req.Limit)
 	var searchRes SearchRes
 	// 2. 遍历索引向量 (Everything 的核心搜索逻辑)
 	for index, nodeIdx := range *targetIdx {
-		//logger.Info("索引: ", index, " 值 ", nodeIdx)
 		if nodeIdx == 0 {
 			continue
 		}
@@ -75,14 +72,10 @@ func (f *FileSystemIndex) Search(req SearchReq) *SearchRes {
 			if !exists {
 				continue // 发现 ID 已不在主表，说明被删了，跳过
 			}
-			//logger.Infof("遍历: %s", Store.Get(node.NameOff, node.NameLen))
 			// 关键词匹配
 			name := Store.Get(node.NameOff, node.NameLen)
-			if matchKeywords(&name, &req.Keywords) {
-				//matchCount++
-				//if matchCount > req.Offset {
-				results = append(results, NewSeachResult(&name, &node))
-				//}
+			if MatchKeywordsZeroAlloc(name, req.Keywords) {
+				results = append(results, NewSeachResult(name, &node))
 				if len(results) >= req.Limit {
 					searchRes.Offset = index
 					break // 达标即止，极速响应
@@ -94,22 +87,44 @@ func (f *FileSystemIndex) Search(req SearchReq) *SearchRes {
 	return &searchRes
 }
 
-func matchKeywords(fileName *string, keywords *[]string) bool {
-	for _, keyword := range *keywords {
-		if !strings.Contains(*fileName, keyword) {
+func matchKeywords(fileName *string, keywords []string) bool {
+	for _, keyword := range keywords {
+		if !strings.Contains(strings.ToLower(*fileName), keyword) {
 			return false
 		}
 	}
 	return true
 }
 
-//func (f *FileSystemIndex) Search(keyword string) (results []FileNode) {
-//	f.mu.RLock()
-//	defer f.mu.RUnlock()
-//	for _, node := range f.Nodes {
-//		if strings.Contains(node.Name, keyword) {
-//			results = append(results, *node)
-//		}
-//	}
-//	return
-//}
+// MatchKeywordsZeroAlloc 零内存分配的关键词匹配
+// 要求：传入的 keywords 必须预先处理为全小写
+func MatchKeywordsZeroAlloc(fileName string, keywords []string) bool {
+	for _, k := range keywords {
+		if !containsIgnoreCase(fileName, k) {
+			return false
+		}
+	}
+	return true
+}
+
+// containsIgnoreCase 模拟 strings.Contains 但忽略大小写，且不产生新字符串
+func containsIgnoreCase(s, substr string) bool {
+	if len(substr) > len(s) {
+		return false
+	}
+
+	// 利用标准库的高效实现，结合 EqualFold 思想
+	// 注意：如果 substr 是纯英文小写，可以显著提升速度
+	for i := 0; i <= len(s)-len(substr); i++ {
+		// 尝试匹配子串
+		if strings.HasPrefix(s[i:], substr) { // 理想情况：直接匹配
+			return true
+		}
+		// 如果直接匹配失败，进行逐字符的大小写不敏感对比
+		// 这里的优化点：如果性能极其敏感，可以使用更底层的字节对比
+		if len(s[i:]) >= len(substr) && strings.EqualFold(s[i:i+len(substr)], substr) {
+			return true
+		}
+	}
+	return false
+}
