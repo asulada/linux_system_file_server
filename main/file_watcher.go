@@ -104,6 +104,7 @@ func (f *FileSystemIndex) ParallelBFSScan(roots []string, scanChan chan<- *ScanR
 
 // doProcess 处理单个目录的扫描逻辑
 func (f *FileSystemIndex) doProcess(path string, taskQueue chan string, scanChan chan<- *ScanResult, wg *sync.WaitGroup) {
+	logger.Info("广度优先扫描：发现目录", path)
 	// 使用 ReadDir 减少一次 os.Stat 调用
 	entries, err := os.ReadDir(path)
 	if err != nil {
