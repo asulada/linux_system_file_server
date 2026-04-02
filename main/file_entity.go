@@ -64,11 +64,12 @@ var (
 	Nodes   = make(map[uint64]FileNode, 200000)
 	PathMap = make(map[string]uint64, 200000)
 	// 修改为嵌套 Map：ParentID -> {ChildID: struct{}}
-	TreeMap = make(map[uint64]map[uint64]struct{}, 50000)
-
+	TreeMap      = make(map[uint64]map[uint64]struct{}, 50000)
 	ChildTreeMap = make(map[uint64]uint64, 50000)
-	WdMap        = make(map[int]string, 50000)
-	PathToWd     = make(map[string]int, 50000) // Path -> wd (用于重命名时快速更新路径)
+
+	wdMu     sync.RWMutex
+	WdMap    = make(map[int]string, 50000)
+	PathToWd = make(map[string]int, 50000) // Path -> wd (用于重命名时快速更新路径)
 
 	// 3. 排序向量：只存 Nodes 的下标，极致省内存
 	TimeIdx []uint64 // 按时间排序
@@ -80,6 +81,26 @@ var (
 
 	Store = &StringStore{} // ✅ 初始化为空实例
 )
+
+func PutWd(path string, wd int) {
+	wdMu.Lock()
+	defer wdMu.Unlock()
+	WdMap[wd] = path
+	PathToWd[path] = wd
+}
+func DeleteWd(path string) {
+	wdMu.Lock()
+	defer wdMu.Unlock()
+	if wd, exists := PathToWd[path]; exists {
+		delete(WdMap, wd)
+		delete(PathToWd, path)
+	}
+}
+func GetWdPath(wd int) string {
+	wdMu.RLock()
+	defer wdMu.RUnlock()
+	return WdMap[wd]
+}
 
 type FileSystemIndex struct {
 	muMove       sync.Mutex

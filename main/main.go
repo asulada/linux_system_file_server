@@ -30,7 +30,7 @@ type Config struct {
 	Account       string
 	Password      string
 	JwtSecret     string `mapstructure:"jwtSecret"`
-	excludeSuffix []string
+	ExcludeSuffix []string
 }
 
 func initLog() *zap.SugaredLogger {

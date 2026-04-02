@@ -20,10 +20,11 @@ func (f *FileSystemIndex) Start(roots []string, storagePath string) {
 	// 1. 尝试从二进制文件加载
 	err := f.Load(storagePath)
 
-	pathChan := make(chan string, 1000)
 	//加载到数据
 	if err == nil && len(Nodes) > 0 {
 		logger.Info("热启动：正在从内存恢复监听...")
+		pathChan := make(chan string, 10000)
+
 		go func() {
 			mu.RLock()
 			defer mu.RUnlock()
@@ -36,104 +37,167 @@ func (f *FileSystemIndex) Start(roots []string, storagePath string) {
 			close(pathChan)
 			logger.Info("热启动：完成")
 		}()
+		for path := range pathChan {
+			f.addWatch(fd, path)
+		}
+
 	} else {
 		logger.Info("冷启动：正在遍历磁盘初始化...")
-		go f.ParallelBFSScan(roots, pathChan)
+		scanChan := make(chan *ScanResult, 10000)
+
+		go f.ParallelBFSScan(roots, scanChan)
+		f.setupWatches(fd, scanChan)
 	}
 
-	f.setupWatches(fd, pathChan)
 	go f.runEventLoop(fd)
 	go f.StartPersistenceTask(context.Background(), storagePath)
 }
 
-// 1.1 ParallelBFSScan 广度优先扫描，确保父节点先于子节点入库
-func (f *FileSystemIndex) ParallelBFSScan(roots []string, pathChan chan<- string) {
+// ParallelBFSScan 执行广度优先扫描
+func (f *FileSystemIndex) ParallelBFSScan(roots []string, scanChan chan<- *ScanResult) {
 	logger.Info("广度优先扫描开始...", roots)
 
-	workQueue := make(chan string, 1000)
-	limit := make(chan struct{}, 4)
-	var globalWg sync.WaitGroup
-	var enqueueWg sync.WaitGroup
+	// 1. 内部任务队列：存放待扫描的目录路径
+	// 缓冲区设为 50000 左右，兼顾内存与并发吞吐
+	taskQueue := make(chan string, 100000)
+	var wg sync.WaitGroup
 
-	// 启动消费者池：固定数量的 goroutine 从队列取任务
-	for i := 0; i < 4; i++ {
+	// 2. 启动 Worker 池（消费 taskQueue，生产结果到 scanChan）
+	const numWorkers = 4 // 根据磁盘性能调整，SSD 建议 8-16
+	for i := 0; i < numWorkers; i++ {
 		go func() {
-			for path := range workQueue {
-				func() {
-					limit <- struct{}{}
-					defer func() { <-limit }()
-
-					defer globalWg.Done()
-					pathChan <- path
-					logger.Info("广度优先扫描：正在处理", path)
-
-					entries, _ := os.ReadDir(path)
-					for _, entry := range entries {
-						fullPath := filepath.Join(path, entry.Name())
-						if entry.IsDir() {
-							logger.Info("广度优先扫描：发现子目录", fullPath)
-							info, _ := os.Stat(fullPath)
-							f.UpsertDir(fullPath, entry.Name(), path, info.ModTime())
-
-							enqueueWg.Add(1)
-							workQueue <- fullPath
-							globalWg.Add(1)
-						} else {
-							f.Upsert(fullPath)
-						}
-					}
-				}()
+			for path := range taskQueue {
+				f.doProcess(path, taskQueue, scanChan, &wg)
+				wg.Done()
 			}
 		}()
 	}
 
-	// 生产者：先加入所有根目录
+	// 3. 注入初始根目录
 	for _, root := range roots {
 		info, err := os.Stat(root)
 		if err != nil {
-			logger.Error("根目录不存在", root, err)
+			logger.Error("根目录不可达", root, err)
 			continue
 		}
-		f.UpsertDir(root, info.Name(), filepath.Dir(root), info.ModTime())
-		enqueueWg.Add(1)
-		workQueue <- root
-		globalWg.Add(1)
+
+		// 根目录直接作为结果发送
+		scanChan <- &ScanResult{
+			Path:       root,
+			Name:       info.Name(),
+			ParentPath: filepath.Dir(root),
+			IsDir:      true,
+			ModTime:    info.ModTime(),
+		}
+
+		// 增加计数并存入待处理队列
+		wg.Add(1)
+		taskQueue <- root
 	}
 
-	// 等待所有入队操作完成，然后关闭队列
-	go func() {
-		enqueueWg.Wait()
-		close(workQueue)
-	}()
-
-	globalWg.Wait()
-	close(pathChan)
-	logger.Info("广度优先扫描完成")
+	// 4. 阻塞直到所有任务（包含后续发现的子目录）完成
+	wg.Wait()
+	close(taskQueue)
+	close(scanChan) // 扫描彻底结束，关闭结果通道通知 setupWatches 退出
+	logger.Info("所有目录扫描及任务分发完成")
 }
 
-// 2 并行建立监听的核心逻辑
-func (f *FileSystemIndex) setupWatches(fd int, paths <-chan string) {
-	var wg sync.WaitGroup
-	for i := 0; i < 4; i++ { // 32个并发协程建立监听
-		wg.Add(1)
+// doProcess 处理单个目录的扫描逻辑
+func (f *FileSystemIndex) doProcess(path string, taskQueue chan string, scanChan chan<- *ScanResult, wg *sync.WaitGroup) {
+	logger.Info("广度优先扫描：发现目录", path)
+	// 使用 ReadDir 减少一次 os.Stat 调用
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		logger.Error("读取目录失败", path, err)
+		return
+	}
+
+	for _, entry := range entries {
+		fullPath := filepath.Join(path, entry.Name())
+		if entry.IsDir() {
+			info, _ := entry.Info()
+			// 发送目录数据到结果通道
+			scanChan <- &ScanResult{
+				Path:       fullPath,
+				Name:       entry.Name(),
+				ParentPath: path,
+				IsDir:      true,
+				ModTime:    info.ModTime(),
+			}
+
+			// 发现新子目录，增加全局计数
+			wg.Add(1)
+
+			// 【死锁防御】：如果任务队列满了，不能让当前 Worker 阻塞
+			select {
+			case taskQueue <- fullPath:
+				// 成功放入队列
+			default:
+				// 队列满时，开启临时协程投递，确保当前 Worker 能继续消费 taskQueue
+				go func(p string) { taskQueue <- p }(fullPath)
+			}
+		} else {
+			if f.ignoreSuffix(entry.Name()) {
+				continue
+			}
+			// 文件直接发送结果
+			scanChan <- &ScanResult{
+				Path:  fullPath,
+				IsDir: false,
+			}
+		}
+	}
+}
+
+// setupWatches 并行处理索引入库与 Inotify 监听
+func (f *FileSystemIndex) setupWatches(fd int, scanChan <-chan *ScanResult) {
+	var watchWg sync.WaitGroup
+	const workers = 4
+
+	for i := 0; i < workers; i++ {
+		watchWg.Add(1)
 		go func() {
-			defer wg.Done()
-			for path := range paths {
-				wd, err := unix.InotifyAddWatch(fd, path, watchMask)
-				if err == nil {
-					mu.Lock()
-					WdMap[wd] = path
-					PathToWd[path] = wd
-					mu.Unlock()
+			defer watchWg.Done()
+			for result := range scanChan {
+				if result.IsDir {
+					// 1. 更新数据库/内存索引
+					f.UpsertDir(result.Path, result.Name, result.ParentPath, result.ModTime)
+					// 2. 添加系统监听
+					f.addWatch(fd, result.Path)
 				} else {
-					logger.Error("监听目录失败", path, err)
+					f.Upsert(result.Path)
 				}
 			}
 		}()
 	}
-	wg.Wait()
-	logger.Info("所有目录已添加监听")
+
+	watchWg.Wait()
+	logger.Info("所有索引及监听建立完成")
 }
+
+type ScanResult struct {
+	Path       string
+	Name       string
+	ParentPath string
+	IsDir      bool
+	ModTime    time.Time
+}
+
+//func (f *FileSystemIndex) setupWatches(fd int, paths <-chan string) {
+//	for i := 0; i < 4; i++ { // 32个并发协程建立监听
+//		go func() {
+//			for path := range paths {
+//				wd, err := unix.InotifyAddWatch(fd, path, watchMask)
+//				if err == nil {
+//					PutWd(path, wd)
+//				} else {
+//					logger.Error("监听目录失败", path, err)
+//				}
+//			}
+//		}()
+//	}
+//	logger.Info("所有目录已添加监听")
+//}
 
 // 3. Searcher 核心逻辑：Upsert 与级联删除
 func (f *FileSystemIndex) Upsert(path string) {
@@ -288,10 +352,7 @@ func (f *FileSystemIndex) Remove(path string, isDir bool) {
 		delete(PathMap, curPath)
 
 		// 3. 清理 WdMap 和 PathToWd
-		if wd, exists := PathToWd[curPath]; exists {
-			delete(WdMap, wd)
-			delete(PathToWd, curPath)
-		}
+		DeleteWd(curPath)
 
 		// 4. 更新父节点的 Size（在删除 ChildTreeMap 之前调用）
 		//f.UpsertParentSize(currID, -node.Size)
@@ -336,7 +397,7 @@ func (f *FileSystemIndex) Remove(path string, isDir bool) {
 }
 func (f *FileSystemIndex) ignoreSuffix(name string) bool {
 	//判断字符串结尾是否以 .swp结尾
-	for _, suffix := range selfConfig.excludeSuffix {
+	for _, suffix := range selfConfig.ExcludeSuffix {
 		if strings.HasSuffix(name, suffix) {
 			return true
 		}
@@ -359,17 +420,19 @@ func (f *FileSystemIndex) runEventLoop(fd int) {
 				logger.Warn("警告：接收到无效的 inotify 事件")
 				continue
 			}
-			mu.RLock()
-			dirPath := WdMap[int(event.Wd)]
-			mu.RUnlock()
-
-			isDir := (mask & unix.IN_ISDIR) != 0
-
 			name := unix.ByteSliceToString(buf[offset+unix.SizeofInotifyEvent : offset+unix.SizeofInotifyEvent+event.Len])
 
+			offset += unix.SizeofInotifyEvent + event.Len
+
+			if name == "" || name == "." || name == ".." {
+				continue
+			}
 			if f.ignoreSuffix(name) {
 				continue
 			}
+
+			dirPath := GetWdPath(int(event.Wd))
+			isDir := (mask & unix.IN_ISDIR) != 0
 			fullPath := filepath.Join(dirPath, name)
 
 			if mask&(unix.IN_MOVED_FROM|unix.IN_MOVED_TO) != 0 {
@@ -391,17 +454,17 @@ func (f *FileSystemIndex) runEventLoop(fd int) {
 					f.Upsert(fullPath)
 				}
 			}
-			offset += unix.SizeofInotifyEvent + event.Len
 		}
 	}
 }
 
 func (f *FileSystemIndex) addWatch(fd int, fullPath string) {
-	wd, _ := unix.InotifyAddWatch(fd, fullPath, watchMask)
-	mu.Lock()
-	defer mu.Unlock()
-	WdMap[wd] = fullPath
-	PathToWd[fullPath] = wd
+	wd, err := unix.InotifyAddWatch(fd, fullPath, watchMask)
+	if err == nil {
+		PutWd(fullPath, wd)
+	} else {
+		logger.Error("监听目录失败", fullPath, err)
+	}
 }
 
 // 监听 移动事件
@@ -446,9 +509,9 @@ func (f *FileSystemIndex) handleMoveEvent(event *unix.InotifyEvent, fullPath str
 			if isDir {
 				//f.UpsertDir(fullPath, fileName, filepath.Dir(fullPath), time.Now())
 				//f.addWatch(fd, fullPath)
-				pathChan := make(chan string, 1000)
-				go f.ParallelBFSScan([]string{fullPath}, pathChan)
-				f.setupWatches(fd, pathChan)
+				scanChan := make(chan *ScanResult, 10000)
+				go f.ParallelBFSScan([]string{fullPath}, scanChan)
+				f.setupWatches(fd, scanChan)
 
 			} else {
 				// 如果没匹配到 Cookie，说明是从外部移入，执行新增
@@ -463,8 +526,7 @@ func (f *FileSystemIndex) handleMoveEvent(event *unix.InotifyEvent, fullPath str
 // addWatchLocked 内部版本：假设调用者已经持有 mu 锁
 func (f *FileSystemIndex) addWatchLocked(fd int, fullPath string) {
 	wd, _ := unix.InotifyAddWatch(fd, fullPath, watchMask)
-	WdMap[wd] = fullPath
-	PathToWd[fullPath] = wd
+	PutWd(fullPath, wd)
 }
 
 // O(1) 路径重命名 (RenameNode)
@@ -526,12 +588,8 @@ func (f *FileSystemIndex) RenameNode(oldPath string, oldName string, newPath str
 	// 2. 处理子项
 	if node.IsDir() {
 		// 3 同步更新自身的 wd 索引
-		if wd, exists := PathToWd[oldPath]; exists {
-			delete(PathToWd, oldPath)
-			delete(WdMap, wd)
-
-			f.addWatchLocked(fd, newPath)
-		}
+		DeleteWd(oldPath)
+		f.addWatchLocked(fd, newPath)
 
 		var renameChild func(uint64)
 		renameChild = func(pid uint64) {
@@ -553,12 +611,9 @@ func (f *FileSystemIndex) RenameNode(oldPath string, oldName string, newPath str
 
 				// 3. 【核心优化】如果是目录，直接通过 O(1) 反向索引更新 wd 信息
 				if childNode.IsDir() {
-					if wd, exists := PathToWd[childOldPath]; exists {
-						delete(PathToWd, childOldPath)
-						delete(WdMap, wd)
+					DeleteWd(childOldPath)
+					f.addWatchLocked(fd, updatedPath)
 
-						f.addWatchLocked(fd, updatedPath)
-					}
 					renameChild(childID)
 				}
 			}
