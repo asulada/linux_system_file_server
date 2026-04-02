@@ -17,7 +17,7 @@ excludeSuffix:
   - .swp
   - .swx
   - 4913
-  - ~
+  - "~"
 dumpPath: ./dump
 account: admin
 password: admin

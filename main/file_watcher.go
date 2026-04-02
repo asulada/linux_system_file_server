@@ -165,6 +165,7 @@ func (f *FileSystemIndex) setupWatches(fd int, scanChan <-chan *ScanResult) {
 					// 2. 添加系统监听
 					f.addWatch(fd, result.Path)
 				} else {
+					//logger.Info("索引文件", result.Path)
 					f.Upsert(result.Path)
 				}
 			}
@@ -203,6 +204,7 @@ type ScanResult struct {
 func (f *FileSystemIndex) Upsert(path string) {
 	info, err := os.Stat(path)
 	if err != nil {
+		logger.Error("索引文件失败", path, err)
 		return
 	}
 
@@ -461,6 +463,7 @@ func (f *FileSystemIndex) runEventLoop(fd int) {
 func (f *FileSystemIndex) addWatch(fd int, fullPath string) {
 	wd, err := unix.InotifyAddWatch(fd, fullPath, watchMask)
 	if err == nil {
+		//logger.Info("监听目录成功 ", fullPath, " wd ", wd)
 		PutWd(fullPath, wd)
 	} else {
 		logger.Error("监听目录失败", fullPath, err)

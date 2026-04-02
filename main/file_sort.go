@@ -104,20 +104,8 @@ func (f *FileSystemIndex) RebuildSizeIndexes() {
 
 // 重置名称排序
 func (f *FileSystemIndex) RebuildNameIndexes() {
-	//logger.Info("重建名称排序")
-
 	defer TimeTrack(time.Now(), "RebuildNameIndexes")
-
-	//locked := mu.TryLock()
-	//if !locked {
-	//	logger.Warn("无法获取 mu 锁")
-	//	return
-	//}
-	//defer mu.Unlock()
-	logger.Info("成功获取 mu 锁")
-	logger.Info("node 长度", len(Nodes))
 	count := uint64(len(Nodes))
-	logger.Info("node 长度", count)
 	// 初始化索引向量
 	TimeIdx = make([]uint64, count)
 	NameIdx = make([]uint64, count)
