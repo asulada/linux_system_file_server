@@ -58,8 +58,8 @@ func (f *FileSystemIndex) RebuildAllIndexes() {
 	}()
 
 	wg.Wait()
-	NameSort = false
-	SizeSort = false
+	//NameSort = false
+	//SizeSort = false
 }
 
 // 重置大小排序
@@ -99,7 +99,7 @@ func (f *FileSystemIndex) RebuildSizeIndexes() {
 	}()
 
 	wg.Wait()
-	SizeSort = false
+	//SizeSort = false
 }
 
 // 重置名称排序
@@ -141,7 +141,7 @@ func (f *FileSystemIndex) RebuildNameIndexes() {
 	}()
 
 	wg.Wait()
-	NameSort = false
+	//NameSort = false
 }
 
 // 集成在 持久化守护任务 或 Dirty 标记检查 中。建议当“失效比例”超过 10% 时触发：

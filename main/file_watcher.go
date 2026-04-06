@@ -13,34 +13,44 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+type OffsetStringChan struct {
+	offset uint64
+	path   string
+}
+
 // 1 启动入口：根据 storageExists 判断加载模式
 func (f *FileSystemIndex) Start(roots []string, storagePath string) {
 	fd, _ := unix.InotifyInit()
 
+	f.fd = fd
 	// 1. 尝试从二进制文件加载
-	err := f.Load(storagePath)
+	err := LoadSnapshot(storagePath)
+	ReplayWAL()
 
 	//加载到数据
 	if err == nil && len(Nodes) > 0 {
 		logger.Info("热启动：正在从内存恢复监听...")
-		pathChan := make(chan string, 10000)
-
+		pathChan := make(chan *OffsetStringChan, 10000)
 		go func() {
-			mu.RLock()
-			defer mu.RUnlock()
-			for path, id := range PathMap {
+			for pathOffset, id := range PathMap {
 				node := Nodes[id]
 				if node.IsDir() {
-					pathChan <- path
+					pathChan <- &OffsetStringChan{
+						offset: pathOffset,
+						path:   GetPathUint64(pathOffset),
+					}
 				}
 			}
 			close(pathChan)
 			logger.Info("热启动：完成")
 		}()
-		for path := range pathChan {
-			f.addWatch(fd, path)
-		}
-
+		func() {
+			mu.RLock()
+			defer mu.RUnlock()
+			for path := range pathChan {
+				f.addWatch(fd, path.path, path.offset)
+			}
+		}()
 	} else {
 		logger.Info("冷启动：正在遍历磁盘初始化...")
 		scanChan := make(chan *ScanResult, 10000)
@@ -162,8 +172,7 @@ func (f *FileSystemIndex) setupWatches(fd int, scanChan <-chan *ScanResult) {
 				if result.IsDir {
 					// 1. 更新数据库/内存索引
 					f.UpsertDir(result.Path, result.Name, result.ParentPath, result.ModTime)
-					// 2. 添加系统监听
-					f.addWatch(fd, result.Path)
+
 				} else {
 					//logger.Info("索引文件", result.Path)
 					f.Upsert(result.Path)
@@ -211,29 +220,35 @@ func (f *FileSystemIndex) Upsert(path string) {
 	mu.Lock()
 	defer mu.Unlock()
 
+	offset, _ := GetPathOff(path)
 	// 如果已存在，仅更新元数据（如 Size, ModTime）
-	if id, exists := PathMap[path]; exists {
-		node := Nodes[id]
-		oldSize := node.Size
-		node.Size = info.Size()
+	if offset != 0 {
+		if id, exists := PathMap[offset]; exists {
+			node := Nodes[id]
+			oldSize := node.Size
+			node.Size = info.Size()
 
-		node.ModTime = info.ModTime().Unix()
+			node.ModTime = info.ModTime().Unix()
 
-		f.UpsertParentSize(id, node.Size-oldSize)
-		SetNode(&node)
-		return
+			f.UpsertParentSize(id, node.Size-oldSize)
+			SetNode(&node)
+			WriteWAL(OpUpdate, &node, path)
+			searchCache.InvalidateByID(id)
+			return
+		}
 	}
 
 	// 新增节点
 	id := SetRealID(atomic.AddUint64(&lastID, 1), info.IsDir())
 	parentPath := filepath.Dir(path)
+	pOffset, _ := GetPathOff(parentPath)
 
 	// 通过 PathMap 查找父节点 ID
-	parentID := PathMap[parentPath]
+	parentID := PathMap[pOffset]
 
 	// 1. 将字符串存入字节块
-	pOff, pLen := Store.Put(path)
-	nOff, nLen := Store.Put(info.Name())
+	pOff, pLen, offset, ppHash := Store.PutPath(path)
+	nOff, nLen := Store.PutName(info.Name())
 
 	node := &FileNode{
 		ID: id, ParentID: parentID,
@@ -243,9 +258,10 @@ func (f *FileSystemIndex) Upsert(path string) {
 		PathOff: pOff,
 		PathLen: pLen,
 	}
-
 	SetNode(node)
-	PathMap[path] = id
+
+	PathMap[offset] = id
+	PathHashIdMap[ppHash] = offset
 
 	// 1. 获取或创建 Parent 的子节点集合
 	if TreeMap[parentID] == nil {
@@ -258,8 +274,14 @@ func (f *FileSystemIndex) Upsert(path string) {
 	ChildTreeMap[id] = parentID
 
 	f.UpsertParentSize(id, info.Size())
-	SizeSort = true
-	NameSort = true
+	//SizeSort = true
+	//NameSort = true
+	indexManager.AddToIndex(info.Name(), id)
+	WriteWAL(OpUpsert, node, path)
+	invalidated := searchCache.InvalidateByNewFile(info.Name())
+	if invalidated {
+		logger.Infof("新增文件 '%s' 触发了 %d 个缓存失效", info.Name(), 1)
+	}
 }
 func (f *FileSystemIndex) UpsertParentSize(childId uint64, size int64) {
 	// 更新父节点的 Size
@@ -278,14 +300,22 @@ func (f *FileSystemIndex) UpsertParentSize(childId uint64, size int64) {
 	}
 }
 
-func (f *FileSystemIndex) UpsertDir(fullPath string, name string, parentPath string, time time.Time) {
+func (f *FileSystemIndex) UpsertDir(path string, name string, parentPath string, time time.Time) {
 	mu.Lock()
 	defer mu.Unlock()
 
+	offset, _ := GetPathOff(path)
 	// 如果已存在，仅更新元数据（如 Size, ModTime）
-	if id, exists := PathMap[fullPath]; exists {
-		node := Nodes[id]
-		node.ModTime = time.Unix()
+	if offset != 0 {
+		if id, exists := PathMap[offset]; exists {
+			node := Nodes[id]
+			node.ModTime = time.Unix()
+			SetNode(&node)
+			WriteWAL(OpUpdate, &node, path)
+			searchCache.InvalidateByID(id)
+		}
+		// 2. 添加系统监听
+		f.addWatch(f.fd, path, offset)
 		return
 	}
 
@@ -293,11 +323,12 @@ func (f *FileSystemIndex) UpsertDir(fullPath string, name string, parentPath str
 	id := SetRealID(atomic.AddUint64(&lastID, 1), true)
 
 	// 通过 PathMap 查找父节点 ID
-	parentID := PathMap[parentPath]
+	parentOffset, _ := GetPathOff(parentPath)
+	parentID := PathMap[parentOffset]
 
 	// 1. 将字符串存入字节块
-	pOff, pLen := Store.Put(fullPath)
-	nOff, nLen := Store.Put(name)
+	pOff, pLen, offset, pHash := Store.PutPath(path)
+	nOff, nLen := Store.PutName(name)
 
 	node := &FileNode{
 		ID: id, ParentID: parentID, Size: 0, ModTime: time.Unix(),
@@ -306,9 +337,11 @@ func (f *FileSystemIndex) UpsertDir(fullPath string, name string, parentPath str
 		PathOff: pOff,
 		PathLen: pLen,
 	}
-
 	SetNode(node)
-	PathMap[fullPath] = id
+
+	offset = GetUint64(pOff, pLen)
+	PathMap[offset] = id
+	PathHashIdMap[pHash] = offset
 
 	// 1. 获取或创建 Parent 的子节点集合
 	if TreeMap[parentID] == nil {
@@ -319,16 +352,22 @@ func (f *FileSystemIndex) UpsertDir(fullPath string, name string, parentPath str
 	TreeMap[parentID][id] = struct{}{}
 	ChildTreeMap[id] = parentID
 
-	SizeSort = true
-	NameSort = true
+	f.addWatch(f.fd, path, offset)
 
+	indexManager.AddToIndex(name, id)
+	WriteWAL(OpUpsert, node, path)
+	invalidated := searchCache.InvalidateByNewFile(name)
+	if invalidated {
+		logger.Infof("新增文件 '%s' 触发了 %d 个缓存失效", name, 1)
+	}
 }
 
 func (f *FileSystemIndex) Remove(path string, isDir bool) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	id, ok := PathMap[path]
+	pathOffset, hash := GetPathOff(path)
+	id, ok := PathMap[pathOffset]
 	if !ok {
 		return
 	}
@@ -351,10 +390,17 @@ func (f *FileSystemIndex) Remove(path string, isDir bool) {
 
 		// 2. 获取路径并清理索引
 		curPath := Store.Get(node.PathOff, node.PathLen)
-		delete(PathMap, curPath)
+		pathOff, hash := GetPathOff(curPath)
+
+		// 3. 清理搜索索引 (N-gram)
+		indexManager.RemoveFromIndex(Store.Get(node.NameOff, node.NameLen), currID)
+		WriteWAL(OpDelete, &node, curPath)
+
+		delete(PathMap, pathOff)
+		delete(PathHashIdMap, hash)
 
 		// 3. 清理 WdMap 和 PathToWd
-		DeleteWd(curPath)
+		DeleteWd(pathOffset)
 
 		// 4. 更新父节点的 Size（在删除 ChildTreeMap 之前调用）
 		//f.UpsertParentSize(currID, -node.Size)
@@ -365,6 +411,7 @@ func (f *FileSystemIndex) Remove(path string, isDir bool) {
 
 		// 6. 最后删除节点本身
 		delete(Nodes, currID)
+		searchCache.InvalidateByID(currID)
 	}
 
 	if isDir {
@@ -385,8 +432,14 @@ func (f *FileSystemIndex) Remove(path string, isDir bool) {
 				f.UpsertParentSize(id, -node.Size)
 			}
 
+			// 清理搜索索引
+			indexManager.RemoveFromIndex(Store.Get(node.NameOff, node.NameLen), id)
+			WriteWAL(OpDelete, &node, path)
+
 			// 清理 PathMap 和 Nodes
-			delete(PathMap, path)
+			delete(PathMap, pathOffset)
+			delete(PathHashIdMap, hash)
+
 			delete(Nodes, id)
 
 			// 清理反向索引
@@ -394,6 +447,7 @@ func (f *FileSystemIndex) Remove(path string, isDir bool) {
 
 			// 确保清理空的子节点集合（理论上文件不应该有子节点）
 			delete(TreeMap, id)
+			searchCache.InvalidateByID(id)
 		}
 	}
 }
@@ -433,8 +487,9 @@ func (f *FileSystemIndex) runEventLoop(fd int) {
 				continue
 			}
 
-			dirPath := GetWdPath(int(event.Wd))
+			parentOffset := GetWdPath(int(event.Wd))
 			isDir := (mask & unix.IN_ISDIR) != 0
+			dirPath := GetPathUint64(parentOffset)
 			fullPath := filepath.Join(dirPath, name)
 
 			if mask&(unix.IN_MOVED_FROM|unix.IN_MOVED_TO) != 0 {
@@ -450,7 +505,6 @@ func (f *FileSystemIndex) runEventLoop(fd int) {
 				if isDir {
 					logger.Info("创建或更新目录 ", fullPath)
 					f.UpsertDir(fullPath, name, dirPath, time.Now())
-					f.addWatch(fd, fullPath)
 				} else {
 					logger.Info("创建或更新文件 ", fullPath)
 					f.Upsert(fullPath)
@@ -460,13 +514,16 @@ func (f *FileSystemIndex) runEventLoop(fd int) {
 	}
 }
 
-func (f *FileSystemIndex) addWatch(fd int, fullPath string) {
-	wd, err := unix.InotifyAddWatch(fd, fullPath, watchMask)
+func (f *FileSystemIndex) addWatch(fd int, path string, offset uint64) {
+	if _, ok := PathToWd[offset]; ok {
+		return
+	}
+	wd, err := unix.InotifyAddWatch(fd, path, watchMask)
 	if err == nil {
 		//logger.Info("监听目录成功 ", fullPath, " wd ", wd)
-		PutWd(fullPath, wd)
+		PutWd(offset, wd)
 	} else {
-		logger.Error("监听目录失败", fullPath, err)
+		logger.Error("监听目录失败", path, err)
 	}
 }
 
@@ -506,7 +563,12 @@ func (f *FileSystemIndex) handleMoveEvent(event *unix.InotifyEvent, fullPath str
 			logger.Info("目录移动", fullPath)
 			// 【核心优化】匹配成功：执行重命名而不是删除再新建
 			delete(f.pendingMoves, event.Cookie)
-			f.RenameNode(move.OldPath, move.OldName, fullPath, fileName, fd, move.OldPPath, pPath)
+			info, err := os.Stat(fullPath)
+			if err != nil {
+				logger.Error("文件不存在", fullPath)
+				return
+			}
+			f.RenameNode(move.OldPath, move.OldName, fullPath, fileName, fd, move.OldPPath, pPath, info.ModTime().Unix())
 		} else {
 			logger.Info("目录移入", fullPath)
 			if isDir {
@@ -527,24 +589,24 @@ func (f *FileSystemIndex) handleMoveEvent(event *unix.InotifyEvent, fullPath str
 }
 
 // addWatchLocked 内部版本：假设调用者已经持有 mu 锁
-func (f *FileSystemIndex) addWatchLocked(fd int, fullPath string) {
+func (f *FileSystemIndex) addWatchLocked(fd int, fullPath string, pathOff uint64) {
 	wd, _ := unix.InotifyAddWatch(fd, fullPath, watchMask)
-	PutWd(fullPath, wd)
+	PutWd(pathOff, wd)
 }
 
 // O(1) 路径重命名 (RenameNode)
 // 由于我们存储了全路径，重命名时只需修改对应的 Node。如果是目录，则需要级联修改其下所有子项的路径前缀。
-func (f *FileSystemIndex) RenameNode(oldPath string, oldName string, newPath string, newName string, fd int, oldPPath string, newPPath string) {
+func (f *FileSystemIndex) RenameNode(oldPath string, oldName string, newPath string, newName string, fd int, oldPPath string, newPPath string, time int64) {
 	mu.Lock()
-	defer func() {
-		mu.Unlock()
-		logger.Info("RenameNode: 已释放 mu 锁", "oldPath", oldPath, "newPath", newPath)
-	}()
-
-	id, ok := PathMap[oldPath]
+	defer mu.Unlock()
+	oldPathOff, olfHash := GetPathOff(oldPath)
+	id, ok := PathMap[oldPathOff]
 	if !ok {
 		return
 	}
+
+	indexManager.RemoveFromIndex(oldName, id)
+	WriteWALRename(id, time, oldPath, newPath)
 
 	node := Nodes[id]
 	// 获取父节点信息
@@ -553,10 +615,12 @@ func (f *FileSystemIndex) RenameNode(oldPath string, oldName string, newPath str
 	oldPathLen := len(oldPath)
 
 	// 1. 将字符串存入字节块
-	pOff, pLen := Store.Put(newPath)
-	nOff, nLen := Store.Put(newName)
+	pOff, pLen, ppOff, ppHash := Store.PutPath(newPath)
+	nOff, nLen := Store.PutName(newName)
 	// 1. 处理节点本身数据
-	delete(PathMap, oldPath)
+	delete(PathMap, oldPathOff)
+	delete(PathHashIdMap, olfHash)
+
 	node.NameOff = nOff
 	node.NameLen = nLen
 	node.PathOff = pOff
@@ -571,8 +635,9 @@ func (f *FileSystemIndex) RenameNode(oldPath string, oldName string, newPath str
 		delete(oldParentChildren, id)
 	}
 
+	parentOff, _ := GetPathOff(newPPath)
 	// 计算新父节点 ID
-	newParentID, exists := PathMap[newPPath]
+	newParentID, exists := PathMap[parentOff]
 	if !exists {
 		// 如果新父节点不存在，说明是跨根目录移动或父节点已被删除
 		logger.Error("新父节点不存在", newPPath)
@@ -588,44 +653,95 @@ func (f *FileSystemIndex) RenameNode(oldPath string, oldName string, newPath str
 	TreeMap[newParentID][id] = struct{}{}
 	ChildTreeMap[id] = newParentID
 
+	node.ModTime = time
 	SetNode(&node)
-	PathMap[newPath] = id
+	PathMap[ppOff] = id
+	PathHashIdMap[ppHash] = ppOff
 
 	// 2. 处理子项
 	if node.IsDir() {
 		// 3 同步更新自身的 wd 索引
-		DeleteWd(oldPath)
-		f.addWatchLocked(fd, newPath)
+		DeleteWd(oldPathOff)
+		f.addWatchLocked(fd, newPath, ppOff)
 
 		var renameChild func(uint64)
 		renameChild = func(pid uint64) {
 			for childID := range TreeMap[pid] {
 				childNode := Nodes[childID]
 				childOldPath := Store.Get(childNode.PathOff, childNode.PathLen)
+				//childOldPathOffset := GetUint64(childNode.PathOff, childNode.PathLen)
+				childOldPathOff, childOldPathHash := GetPathOff(childOldPath)
 
 				// 安全且高效的路径拼接
 				updatedPath := newPath + childOldPath[oldPathLen:]
 
 				// 更新 PathMap 索引
-				delete(PathMap, childOldPath)
+				delete(PathMap, childOldPathOff)
+				delete(PathHashIdMap, childOldPathHash)
 
-				cPathOff, cPathlen := Store.Put(updatedPath)
+				cPathOff, cPathlen, cpPathOff, cpPathHash := Store.PutPath(updatedPath)
 				childNode.PathOff = cPathOff
 				childNode.PathLen = cPathlen
 				SetNode(&childNode)
-				PathMap[updatedPath] = childID
+
+				PathMap[cpPathOff] = childID
+				PathHashIdMap[cpPathHash] = cpPathOff
 
 				// 3. 【核心优化】如果是目录，直接通过 O(1) 反向索引更新 wd 信息
 				if childNode.IsDir() {
-					DeleteWd(childOldPath)
-					f.addWatchLocked(fd, updatedPath)
+					DeleteWd(childOldPathOff)
+					f.addWatchLocked(fd, updatedPath, cpPathOff)
 
 					renameChild(childID)
+					searchCache.InvalidateByID(childID)
 				}
 			}
 		}
 		renameChild(id)
 	}
 	f.UpsertParentSize(id, node.Size) // 加到新父节点上
-	NameSort = true
+	//NameSort = true
+	indexManager.AddToIndex(newName, id)
+	searchCache.InvalidateByID(id)
+}
+
+func ApplyToMemory(n FileNode, path string) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	// 1. 提取文件名 (Name)
+	name := filepath.Base(path)
+
+	// 2. 存入你的 StringStore (Store)，获取偏移量
+	// 这样 Nodes 里的 NameOff 和 NameLen 就恢复了
+	nOff, nLen := Store.PutName(name)
+	pOff, pLen, ppOff, pHash := Store.PutPath(path)
+
+	// 3. 更新 Node 字段
+	n.NameOff = nOff
+	n.NameLen = nLen
+	n.PathOff = pOff
+	n.PathLen = pLen
+
+	// 4. 填充 Nodes Map
+	Nodes[n.ID] = n
+
+	// 5. 恢复路径反查 ID 的 Map
+	PathMap[ppOff] = n.ID
+	PathHashIdMap[pHash] = n.ID
+
+	// 6. 恢复树形结构 (TreeMap)
+	if TreeMap[n.ParentID] == nil {
+		TreeMap[n.ParentID] = make(map[uint64]struct{})
+	}
+	TreeMap[n.ParentID][n.ID] = struct{}{}
+	ChildTreeMap[n.ID] = n.ParentID
+
+	// 7. 恢复搜索索引 (N-gram)
+	indexManager.AddToIndex(name, n.ID)
+
+	// 8. 维护全局最大 ID，确保新产生的 ID 不冲突
+	if n.ID > atomic.LoadUint64(&lastID) {
+		atomic.StoreUint64(&lastID, n.ID)
+	}
 }

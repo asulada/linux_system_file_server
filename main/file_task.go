@@ -33,24 +33,15 @@ func (f *FileSystemIndex) StartPersistenceTask(ctx context.Context, storagePath 
 
 			// 定时保存
 			logger.Infof("执行定时自动保存...")
-			if err := f.Save(storagePath); err != nil {
-				logger.Error("定时保存失败: ", err)
-			}
+			CheckAndCheckpoint()
 
 		case sig := <-sigChan:
 			// 捕获到退出信号
 			logger.Infof("n收到信号 [%v]，正在执行安全退出前的数据保存...", sig)
 			start := time.Now()
 
-			//清理无用字节块
-			logger.Infof("退出前清理无用字节块...")
-			Store.Compact()
-
-			// 清理失效排序
-			logger.Infof("退出前清理失效排序...")
-			f.SortCompact()
-
-			if err := f.Save(storagePath); err != nil {
+			CloseWAL()
+			if err := SaveSnapshot(storagePath); err != nil {
 				logger.Error("退出前保存失败: ", err)
 			}
 			logger.Infof("数据已安全持久化，耗时: %v", time.Since(start))
@@ -58,7 +49,7 @@ func (f *FileSystemIndex) StartPersistenceTask(ctx context.Context, storagePath 
 
 		case <-ctx.Done():
 			// 如果父 context 被取消（用于程序内部逻辑退出）
-			f.Save(storagePath)
+			SaveSnapshot(storagePath)
 			return
 		}
 	}

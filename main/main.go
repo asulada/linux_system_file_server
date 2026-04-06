@@ -3,12 +3,13 @@ package main
 import (
 	"errors"
 	"fmt"
-	"github.com/gin-gonic/gin"
-	"github.com/spf13/viper"
-	"go.uber.org/zap"
 	"net/http"
 	jwt "system_file_server/auth"
 	logConfig "system_file_server/logger"
+
+	"github.com/gin-gonic/gin"
+	"github.com/spf13/viper"
+	"go.uber.org/zap"
 )
 
 var (
@@ -25,6 +26,8 @@ type Config struct {
 	Password      string
 	JwtSecret     string `mapstructure:"jwtSecret"`
 	ExcludeSuffix []string
+	WalPath       string
+	WALThreshold  int64
 }
 
 func initLog() *zap.SugaredLogger {
@@ -63,6 +66,8 @@ func initConfig() {
 	if err := v.Unmarshal(&selfConfig); err != nil {
 		logger.Error("err", err)
 	}
+	selfConfig.WALThreshold *= 1024 * 1024
+	jwt.SetJwtSecret(selfConfig.JwtSecret)
 }
 
 // 自定义 BasicAuth 中间件

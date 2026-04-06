@@ -3,6 +3,7 @@ module system_file_server
 go 1.25.7
 
 require (
+	github.com/RoaringBitmap/roaring v1.9.4
 	github.com/gin-gonic/gin v1.12.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/natefinch/lumberjack v2.0.0+incompatible
@@ -13,6 +14,7 @@ require (
 
 require (
 	github.com/BurntSushi/toml v1.6.0 // indirect
+	github.com/bits-and-blooms/bitset v1.12.0 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/bytedance/sonic v1.15.0 // indirect
 	github.com/bytedance/sonic/loader v0.5.0 // indirect
@@ -32,6 +34,7 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
+	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.59.0 // indirect
