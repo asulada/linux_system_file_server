@@ -25,6 +25,7 @@ type SearchResult struct {
 type SearchRes struct {
 	Results []*SearchResult `json:"results"`
 	Offset  int             `json:"offset"`
+	Total   int             `json:"total"`
 }
 
 func NewSeachResult(name string, node *FileNode) *SearchResult {
@@ -42,53 +43,40 @@ func NewSeachResult(name string, node *FileNode) *SearchResult {
 // SearchPaged 分页多关键词搜索
 
 func (f *FileSystemIndex) Search(req SearchReq) *SearchRes {
-	mu.RLock()
-	defer mu.RUnlock()
+	pageResult := indexManager.Search(req.Keywords, req.SortBy, req.Offset, req.Limit)
 
-	// 1. 选择索引向量
-	var targetIdx *[]uint64
-	switch req.SortBy {
-	case "size":
-		if SizeSort {
-			f.RebuildSizeIndexes()
+	results := make([]*SearchResult, 0, len(pageResult.IDs))
+
+	if len(pageResult.IDs) == 0 {
+		return &SearchRes{
+			Results: results,
+			Offset:  pageResult.Total,
+			Total:   pageResult.Total,
 		}
-		targetIdx = &SizeIdx
-	case "time":
-		targetIdx = &TimeIdx
-	default:
-		if NameSort {
-			f.RebuildNameIndexes()
-		}
-		targetIdx = &NameIdx
 	}
 
-	results := make([]*SearchResult, 0, req.Limit)
-	var searchRes SearchRes
-	// 2. 遍历索引向量 (Everything 的核心搜索逻辑)
-	for index, nodeIdx := range *targetIdx {
+	mu.RLock()
+	for _, nodeIdx := range pageResult.IDs {
 		if nodeIdx == 0 {
 			continue
 		}
-		if index > req.Offset {
-			node, exists := Nodes[nodeIdx]
-			if !exists {
-				continue // 发现 ID 已不在主表，说明被删了，跳过
-			}
-			// 关键词匹配
-			name := Store.Get(node.NameOff, node.NameLen)
-			if MatchKeywordsZeroAlloc(name, req.Keywords) {
-				results = append(results, NewSeachResult(name, &node))
-				if len(results) >= req.Limit {
-					searchRes.Offset = index
-					break // 达标即止，极速响应
-				}
-			}
-		}
-	}
-	searchRes.Results = results
-	return &searchRes
-}
 
+		node, exists := Nodes[nodeIdx]
+		if !exists {
+			continue
+		}
+
+		name := Store.Get(node.NameOff, node.NameLen)
+		results = append(results, NewSeachResult(name, &node))
+	}
+	mu.RUnlock()
+
+	return &SearchRes{
+		Results: results,
+		Offset:  pageResult.Offset,
+		Total:   pageResult.Total,
+	}
+}
 func matchKeywords(fileName *string, keywords []string) bool {
 	for _, keyword := range keywords {
 		if !strings.Contains(strings.ToLower(*fileName), keyword) {

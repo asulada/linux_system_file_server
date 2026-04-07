@@ -1,26 +1,21 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	jwt "system_file_server/auth"
+	logConfig "system_file_server/logger"
+
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
-	"net/http"
-	"os"
-	"regexp"
-	"sync/atomic"
-	jwt "system_file_server/auth"
-	logConfig "system_file_server/logger"
-	"time"
 )
 
 var (
 	logger     *zap.SugaredLogger
 	selfConfig Config
 	fileSystem *FileSystemIndex
-	re         = regexp.MustCompile(`^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$`)
 )
 
 type Config struct {
@@ -31,6 +26,8 @@ type Config struct {
 	Password      string
 	JwtSecret     string `mapstructure:"jwtSecret"`
 	ExcludeSuffix []string
+	WalPath       string
+	WALThreshold  int64
 }
 
 func initLog() *zap.SugaredLogger {
@@ -69,6 +66,8 @@ func initConfig() {
 	if err := v.Unmarshal(&selfConfig); err != nil {
 		logger.Error("err", err)
 	}
+	selfConfig.WALThreshold *= 1024 * 1024
+	jwt.SetJwtSecret(selfConfig.JwtSecret)
 }
 
 func moveChar(name *string) *string {

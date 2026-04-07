@@ -18,7 +18,9 @@ excludeSuffix:
   - .swx
   - 4913
   - "~"
-dumpPath: ./dump
+dumpPath: ./index.db
 account: admin
 password: admin
 jwtSecret: your-super-secret-key-here-2024
+walPath: ./index.wal
+wALThreshold: 100
