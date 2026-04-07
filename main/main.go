@@ -199,6 +199,7 @@ func saveName(name string) {
 	}
 	SetNode(&node)
 	indexManager.AddToIndex(name, id)
+	searchCache.InvalidateByNewFile(name)
 	WriteWALInvalid(&node, name)
 }
 
@@ -284,6 +285,7 @@ func deleteInvalid(context *gin.Context) {
 
 	delete(Nodes, nodeID)
 
+	searchCache.InvalidateByID(nodeID)
 	WriteWALInvalidDelete(&node, name)
 
 	SendResponse(context, http.StatusOK, "删除成功", nil)
