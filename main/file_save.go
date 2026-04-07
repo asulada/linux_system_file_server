@@ -489,9 +489,9 @@ func (w *WALAsyncWriter) writeEntry(entry *WALEntry) {
 		copy(buf[offset:], newPathBuf)
 
 	default:
-		// 其他操作：1字节操作码 + 40字节Node数据 + 2字节路径长度 + N字节路径内容
+		// 其他操作：1字节操作码 + 32字节Node数据 + 2字节路径长度 + N字节路径内容
 		pBuf := []byte(entry.Path)
-		buf = make([]byte, 1+40+2+len(pBuf))
+		buf = make([]byte, 1+32+2+len(pBuf))
 		buf[0] = entry.Op
 		binary.LittleEndian.PutUint64(buf[1:9], entry.Node.ID)
 		binary.LittleEndian.PutUint64(buf[9:17], entry.Node.ParentID)
