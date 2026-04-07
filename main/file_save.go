@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 func CheckAndCheckpoint() {
@@ -54,11 +56,12 @@ func CheckAndCheckpoint() {
 }
 
 const (
-	OpUpsert  uint8 = 1 // 新增
-	OpUpdate  uint8 = 2 // 更新元数据
-	OpDelete  uint8 = 3 // 删除
-	OpRename  uint8 = 4 // 重命名/移动
-	OpInvalid uint8 = 5 // 重命名/移动
+	OpUpsert        uint8 = 1 // 新增
+	OpUpdate        uint8 = 2 // 更新元数据
+	OpDelete        uint8 = 3 // 删除
+	OpRename        uint8 = 4 // 重命名/移动
+	OpInvalid       uint8 = 5
+	OpInvalidDelete uint8 = 6
 )
 
 // WriteWAL 将单次操作增量写入日志文件（已废弃，保留兼容）
@@ -177,6 +180,20 @@ func ReplayWAL() {
 			path := string(pBuf)
 
 			MarkNodeInvalid(n, path)
+		case OpInvalidDelete:
+			var id uint64
+			binary.Read(br, binary.LittleEndian, &id)
+
+			var modTimeUint uint64
+			binary.Read(br, binary.LittleEndian, &modTimeUint)
+
+			var nameLen uint16
+			binary.Read(br, binary.LittleEndian, &nameLen)
+			nameBuf := make([]byte, nameLen)
+			io.ReadFull(br, nameBuf)
+			name := string(nameBuf)
+
+			DeleteInvalidNode(id, name)
 
 		default:
 			logger.Warn("未知的 WAL 操作码", op)
@@ -184,15 +201,35 @@ func ReplayWAL() {
 	}
 }
 
-func MarkNodeInvalid(n FileNode, path string) {
+func DeleteInvalidNode(id uint64, name string) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	n.Invalid = true
-	SetNode(&n)
+	delete(Nodes, id)
 
-	searchCache.InvalidateByID(n.ID)
-	logger.Info("WAL 重放：节点已标记为无效", path)
+	indexManager.RemoveFromIndex(name, id)
+
+	logger.Info("WAL 重放：已删除无效名称节点", zap.Uint64("id", id), zap.String("name", name))
+}
+func MarkNodeInvalid(n FileNode, name string) {
+	mu.Lock()
+	defer mu.Unlock()
+	nOff, nLen := Store.PutName(name)
+
+	node := &FileNode{
+		ID:       n.ID,
+		ParentID: 0,
+		Size:     0,
+		ModTime:  n.ModTime,
+		NameOff:  nOff,
+		NameLen:  nLen,
+		PathOff:  0,
+		PathLen:  0,
+		Invalid:  true,
+	}
+
+	SetNode(node)
+	indexManager.AddToIndex(name, node.ID)
 }
 
 // UpdateNodeMetadata 仅更新节点的元数据（用于 WAL 重放时的更新操作）
@@ -540,7 +577,14 @@ func (w *WALAsyncWriter) writeEntry(entry *WALEntry) {
 		binary.LittleEndian.PutUint64(buf[9:17], uint64(entry.Node.ModTime))
 		binary.LittleEndian.PutUint16(buf[17:19], uint16(len(entry.Path)))
 		copy(buf[19:], pBuf)
-
+	case OpInvalidDelete:
+		nameBuf := []byte(entry.Path)
+		buf = make([]byte, 1+8+8+2+len(nameBuf))
+		buf[0] = OpInvalidDelete
+		binary.LittleEndian.PutUint64(buf[1:9], entry.Node.ID)
+		binary.LittleEndian.PutUint64(buf[9:17], uint64(entry.Node.ModTime))
+		binary.LittleEndian.PutUint16(buf[17:19], uint16(len(nameBuf)))
+		copy(buf[19:], nameBuf)
 	default:
 		// 其他操作：1字节操作码 + 32字节Node数据 + 2字节路径长度 + N字节路径内容
 		pBuf := []byte(entry.Path)
@@ -555,6 +599,16 @@ func (w *WALAsyncWriter) writeEntry(entry *WALEntry) {
 	}
 
 	w.writer.Write(buf)
+}
+
+// WriteWALInvalidDelete 专门用于写入删除无效名称的 WAL 日志
+func WriteWALInvalidDelete(node *FileNode, name string) error {
+	SubmitWAL(&WALEntry{
+		Op:   OpInvalidDelete,
+		Node: node,
+		Path: name,
+	})
+	return nil
 }
 
 // FlushWAL 强制刷新 WAL 缓冲区（用于 Checkpoint 前）

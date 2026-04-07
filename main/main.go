@@ -165,12 +165,25 @@ func create(context *gin.Context) {
 		return
 	}
 
+	if len(nameSlice) == 0 {
+		SendResponse(context, http.StatusBadRequest, "名称列表不能为空", nil)
+		return
+	}
+
 	mu.Lock()
 	defer mu.Unlock()
+	successCount := 0
 	for _, nameStr := range nameSlice {
-		saveName(*moveChar(&nameStr))
+		cleanedName := moveChar(&nameStr)
+		if cleanedName == nil || *cleanedName == "" {
+			logger.Warn("跳过空名称")
+			continue
+		}
+		saveName(*cleanedName)
+		successCount++
 	}
-	OkResponse(context, http.StatusOK, "保存成功", nil)
+
+	SendResponse(context, http.StatusOK, fmt.Sprintf("成功保存 %d 个无效名称", successCount), nil)
 }
 func saveName(name string) {
 	id := atomic.AddUint64(&lastID, 1)
@@ -185,6 +198,7 @@ func saveName(name string) {
 		Invalid: true,
 	}
 	SetNode(&node)
+	indexManager.AddToIndex(name, id)
 	WriteWALInvalid(&node, name)
 }
 
@@ -254,8 +268,24 @@ func deleteInvalid(context *gin.Context) {
 		SendResponse(context, http.StatusBadRequest, "无效的 ID 类型", nil)
 		return
 	}
+	node, exists := Nodes[nodeID]
+	if !exists {
+		SendResponse(context, http.StatusNotFound, "节点不存在", nil)
+		return
+	}
+
+	if !node.Invalid {
+		SendResponse(context, http.StatusBadRequest, "该节点不是无效节点", nil)
+		return
+	}
+	name := Store.Get(node.NameOff, node.NameLen)
+
+	indexManager.RemoveFromIndex(name, nodeID)
 
 	delete(Nodes, nodeID)
+
+	WriteWALInvalidDelete(&node, name)
+
 	SendResponse(context, http.StatusOK, "删除成功", nil)
 }
 func TimingMiddleware() gin.HandlerFunc {
