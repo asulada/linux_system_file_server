@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -285,21 +286,29 @@ func SaveSnapshot(filePath string) error {
 	binary.Write(bw, binary.LittleEndian, uint32(len(Nodes)))
 
 	for _, node := range Nodes {
-		path := Store.Get(node.PathOff, node.PathLen) // 从 PathStore 获取该 ID 对应的路径字符串
-		pBuf := []byte(path)
+		binary.Write(bw, binary.LittleEndian, node.ID)
+		binary.Write(bw, binary.LittleEndian, node.ParentID)
+		binary.Write(bw, binary.LittleEndian, node.Size)
+		binary.Write(bw, binary.LittleEndian, node.ModTime)
 
-		binary.Write(bw, binary.LittleEndian, node.ID)       // 写入 ID
-		binary.Write(bw, binary.LittleEndian, node.ParentID) // 写入父 ID
-		binary.Write(bw, binary.LittleEndian, node.Size)     // 写入大小
-		binary.Write(bw, binary.LittleEndian, node.ModTime)  // 写入时间
 		var flags byte
 		if node.Invalid {
 			flags |= 0x01
 		}
 		bw.WriteByte(flags)
 		bw.Write(make([]byte, 7))
-		binary.Write(bw, binary.LittleEndian, uint16(len(pBuf))) // 写入路径长度
-		bw.Write(pBuf)                                           // 直接写入原始路径字节
+
+		if node.Invalid {
+			name := Store.Get(node.NameOff, node.NameLen)
+			nBuf := []byte(name)
+			binary.Write(bw, binary.LittleEndian, uint16(len(nBuf)))
+			bw.Write(nBuf)
+		} else {
+			path := Store.Get(node.PathOff, node.PathLen)
+			pBuf := []byte(path)
+			binary.Write(bw, binary.LittleEndian, uint16(len(pBuf)))
+			bw.Write(pBuf)
+		}
 	}
 	bw.Flush() // 确保缓冲区剩余数据全部进入磁盘
 	f.Close()
@@ -339,12 +348,25 @@ func LoadSnapshot(filePath string) error {
 		n.Invalid = (flags & 0x01) != 0
 		br.Read(make([]byte, 7))
 
-		var pLen uint16
-		binary.Read(br, binary.LittleEndian, &pLen)
-		pBuf := make([]byte, pLen)
-		io.ReadFull(br, pBuf) // 读取路径内容
+		var strLen uint16
+		binary.Read(br, binary.LittleEndian, &strLen)
+		strBuf := make([]byte, strLen)
+		io.ReadFull(br, strBuf)
+		str := string(strBuf)
 
-		ApplyToMemory(n, string(pBuf)) // 恢复到内存数据结构中
+		if n.Invalid {
+			nOff, nLen := Store.PutName(str)
+			n.NameOff = nOff
+			n.NameLen = nLen
+			SetNode(&n)
+			indexManager.AddToIndex(str, n.ID)
+			realID := n.GetRealID()
+			if realID > atomic.LoadUint64(&lastID) {
+				atomic.StoreUint64(&lastID, realID)
+			}
+		} else {
+			ApplyToMemory(n, str)
+		}
 	}
 	return nil
 }
