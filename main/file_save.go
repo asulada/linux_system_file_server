@@ -54,10 +54,11 @@ func CheckAndCheckpoint() {
 }
 
 const (
-	OpUpsert uint8 = 1 // 新增
-	OpUpdate uint8 = 2 // 更新元数据
-	OpDelete uint8 = 3 // 删除
-	OpRename uint8 = 4 // 重命名/移动
+	OpUpsert  uint8 = 1 // 新增
+	OpUpdate  uint8 = 2 // 更新元数据
+	OpDelete  uint8 = 3 // 删除
+	OpRename  uint8 = 4 // 重命名/移动
+	OpInvalid uint8 = 5 // 重命名/移动
 )
 
 // WriteWAL 将单次操作增量写入日志文件（已废弃，保留兼容）
@@ -78,6 +79,16 @@ func WriteWALRename(id uint64, modTime int64, oldPath string, newPath string) er
 		OldPath: oldPath,
 		NewPath: newPath,
 		ModTime: modTime,
+	})
+	return nil
+}
+
+// WriteWALInvalid 专门用于写入标记无效操作的 WAL 日志
+func WriteWALInvalid(node *FileNode, path string) error {
+	SubmitWAL(&WALEntry{
+		Op:   OpInvalid,
+		Node: node,
+		Path: path,
 	})
 	return nil
 }
@@ -151,11 +162,37 @@ func ReplayWAL() {
 			oldPPath := filepath.Dir(oldPath)
 			newPPath := filepath.Dir(newPath)
 			RenameNodeRebuild(oldPath, oldName, newPath, newName, fileSystem.fd, oldPPath, newPPath, modTime)
+		case OpInvalid:
+			var n FileNode
+			binary.Read(br, binary.LittleEndian, &n.ID)
+
+			var modTimeUint uint64
+			binary.Read(br, binary.LittleEndian, &modTimeUint)
+			n.ModTime = int64(modTimeUint)
+
+			var pLen uint16
+			binary.Read(br, binary.LittleEndian, &pLen)
+			pBuf := make([]byte, pLen)
+			io.ReadFull(br, pBuf)
+			path := string(pBuf)
+
+			MarkNodeInvalid(n, path)
 
 		default:
 			logger.Warn("未知的 WAL 操作码", op)
 		}
 	}
+}
+
+func MarkNodeInvalid(n FileNode, path string) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	n.Invalid = true
+	SetNode(&n)
+
+	searchCache.InvalidateByID(n.ID)
+	logger.Info("WAL 重放：节点已标记为无效", path)
 }
 
 // UpdateNodeMetadata 仅更新节点的元数据（用于 WAL 重放时的更新操作）
@@ -218,8 +255,12 @@ func SaveSnapshot(filePath string) error {
 		binary.Write(bw, binary.LittleEndian, node.ParentID) // 写入父 ID
 		binary.Write(bw, binary.LittleEndian, node.Size)     // 写入大小
 		binary.Write(bw, binary.LittleEndian, node.ModTime)  // 写入时间
-		bw.Write(make([]byte, 7))                            // 写入 7 字节填充，保证 8 字节对齐（CPU 读写更快）
-
+		var flags byte
+		if node.Invalid {
+			flags |= 0x01
+		}
+		bw.WriteByte(flags)
+		bw.Write(make([]byte, 7))
 		binary.Write(bw, binary.LittleEndian, uint16(len(pBuf))) // 写入路径长度
 		bw.Write(pBuf)                                           // 直接写入原始路径字节
 	}
@@ -256,6 +297,10 @@ func LoadSnapshot(filePath string) error {
 		binary.Read(br, binary.LittleEndian, &n.ParentID)
 		binary.Read(br, binary.LittleEndian, &n.Size)
 		binary.Read(br, binary.LittleEndian, &n.ModTime)
+
+		flags, _ := br.ReadByte()
+		n.Invalid = (flags & 0x01) != 0
+		br.Read(make([]byte, 7))
 
 		var pLen uint16
 		binary.Read(br, binary.LittleEndian, &pLen)
@@ -487,6 +532,14 @@ func (w *WALAsyncWriter) writeEntry(entry *WALEntry) {
 		binary.LittleEndian.PutUint16(buf[offset:offset+2], uint16(len(newPathBuf)))
 		offset += 2
 		copy(buf[offset:], newPathBuf)
+	case OpInvalid:
+		pBuf := []byte(entry.Path)
+		buf = make([]byte, 1+16+2+len(pBuf))
+		buf[0] = OpInvalid
+		binary.LittleEndian.PutUint64(buf[1:9], entry.Node.ID)
+		binary.LittleEndian.PutUint64(buf[9:17], uint64(entry.Node.ModTime))
+		binary.LittleEndian.PutUint16(buf[17:19], uint16(len(entry.Path)))
+		copy(buf[19:], pBuf)
 
 	default:
 		// 其他操作：1字节操作码 + 32字节Node数据 + 2字节路径长度 + N字节路径内容

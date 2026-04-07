@@ -1,9 +1,10 @@
 package main
 
 import (
-	"golang.org/x/sys/unix"
 	"sync"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // 2. 并行扫描与监听逻辑
@@ -26,10 +27,15 @@ type FileNode struct {
 	Invalid bool
 
 	// 指向字节块的偏移量和长度
-	NameOff uint32
+	NameOff uint64
 	NameLen uint16
-	PathOff uint32
+	PathOff uint64
 	PathLen uint16
+}
+
+type StringStore struct {
+	mu   sync.RWMutex
+	Data []byte
 }
 
 // 辅助方法：处理 IsDir 标志位
@@ -42,7 +48,7 @@ func SetRealID(id uint64, isDir bool) uint64 {
 	if isDir {
 		id |= IsDirMask // 只在是目录时设置标志位
 	}
-	// 是文件时什么都不做，因为 realID 最高位本来就是 0
+	// 是文件时什么都不做，因为 realID 最高位1本来就是 0
 	return id
 }
 func SetNode(node *FileNode) {

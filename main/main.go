@@ -1,11 +1,16 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"regexp"
+	"sync/atomic"
 	jwt "system_file_server/auth"
 	logConfig "system_file_server/logger"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/viper"
@@ -16,6 +21,7 @@ var (
 	logger     *zap.SugaredLogger
 	selfConfig Config
 	fileSystem *FileSystemIndex
+	re         = regexp.MustCompile(`^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$`)
 )
 
 type Config struct {
@@ -145,7 +151,6 @@ func search(c *gin.Context) {
 		})
 		return
 	}
-	logger.Info("收到 json 参数", zap.Reflect("req", req))
 	result := fileSystem.Search(req)
 	SendResponse(c, http.StatusOK, "", result)
 }
@@ -160,6 +165,8 @@ func create(context *gin.Context) {
 		return
 	}
 
+	mu.Lock()
+	defer mu.Unlock()
 	for _, nameStr := range nameSlice {
 		saveName(*moveChar(&nameStr))
 	}
@@ -169,7 +176,7 @@ func saveName(name string) {
 	mu.Lock()
 	defer mu.Unlock()
 	id := atomic.AddUint64(&lastID, 1)
-	nOff, nLen := Store.Put(name)
+	nOff, nLen := Store.PutName(name)
 	node := FileNode{
 		ID: id, ParentID: 0,
 		Size: 0, ModTime: time.Now().Unix(),
@@ -180,7 +187,7 @@ func saveName(name string) {
 		Invalid: true,
 	}
 	SetNode(&node)
-	NameSort = true
+	WriteWALInvalid(&node, name)
 }
 
 func exportInvalid(context *gin.Context) {
