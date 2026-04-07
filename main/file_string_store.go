@@ -1,5 +1,7 @@
 package main
 
+import "path/filepath"
+
 func (ss *StringStore) PutName(s string) (offset uint64, length uint16) {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
@@ -42,23 +44,36 @@ func (ss *StringStore) Compact() {
 
 	// 2. 遍历当前所有活跃节点，重写偏移量
 	for _, node := range Nodes {
-		// 提取旧字符串
-		oldName := Store.Get(node.NameOff, node.NameLen)
+		// 跳过无效节点（无效节点只有名称，没有路径）
+		if node.Invalid {
+			oldName := Store.Get(node.NameOff, node.NameLen)
+			newNameOff := uint64(len(newStore))
+			newStore = append(newStore, oldName...)
+
+			node.NameOff = newNameOff
+			SetNode(&node)
+			continue
+		}
+
+		// 提取完整路径
 		oldPath := Store.Get(node.PathOff, node.PathLen)
 
-		// 写入新块，更新偏移量
-		newNameOff := uint64(len(newStore))
-		newStore = append(newStore, oldName...)
-
+		// 只存储路径一次
 		newPathOff := uint64(len(newStore))
 		newStore = append(newStore, oldPath...)
 
+		// 从路径中计算文件名的偏移量
+		name := filepath.Base(oldPath)
+		dirLen := len(oldPath) - len(name)
+		newNameOff := newPathOff + uint64(dirLen)
+
 		// 更新内存中的节点信息
 		node.NameOff = newNameOff
+		node.NameLen = uint16(len(name))
 		node.PathOff = newPathOff
+		node.PathLen = uint16(len(oldPath))
 		SetNode(&node)
 	}
-
 	// 3. 替换旧块
 	Store.Data = newStore
 

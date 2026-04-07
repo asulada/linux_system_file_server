@@ -255,13 +255,22 @@ func (f *FileSystemIndex) Upsert(path string) {
 
 	// 1. 将字符串存入字节块
 	pOff, pLen, offset, ppHash := Store.PutPath(path)
-	nOff, nLen := Store.PutName(info.Name())
+	// 从完整路径中计算文件名的偏移量，避免重复存储
+	nameStr := info.Name()
+	dirLen := len(path) - len(nameStr)
+	nOff := pOff + uint64(dirLen)
 
+	nLen := len(nameStr)
+	// 验证文件名长度不会溢出 uint16
+	if nLen > 65535 {
+		logger.Errorf("文件名过长: %s, 长度: %d", nameStr, nLen)
+		return
+	}
 	node := &FileNode{
 		ID: id, ParentID: parentID,
 		Size: info.Size(), ModTime: info.ModTime().Unix(),
 		NameOff: nOff,
-		NameLen: nLen,
+		NameLen: uint16(nLen),
 		PathOff: pOff,
 		PathLen: pLen,
 	}
@@ -335,12 +344,20 @@ func (f *FileSystemIndex) UpsertDir(path string, name string, parentPath string,
 
 	// 1. 将字符串存入字节块
 	pOff, pLen, offset, pHash := Store.PutPath(path)
-	nOff, nLen := Store.PutName(name)
+	// 从完整路径中计算目录名的偏移量，避免重复存储
+	dirLen := len(path) - len(name)
+	nOff := pOff + uint64(dirLen)
 
+	nLen := len(name)
+	// 验证文件名长度不会溢出 uint16
+	if nLen > 65535 {
+		logger.Errorf("目录名过长: %s, 长度: %d", name, nLen)
+		return
+	}
 	node := &FileNode{
 		ID: id, ParentID: parentID, Size: 0, ModTime: time.Unix(),
 		NameOff: nOff,
-		NameLen: nLen,
+		NameLen: uint16(nLen),
 		PathOff: pOff,
 		PathLen: pLen,
 	}
@@ -472,6 +489,9 @@ func (f *FileSystemIndex) ignoreSuffix(name string) bool {
 func (f *FileSystemIndex) runEventLoop(fd int) {
 	buf := make([]byte, 4096)
 	for {
+		if Cancel.Load() {
+			break
+		}
 		n, _ := unix.Read(fd, buf)
 		var offset uint32
 		for offset < uint32(n) {
@@ -623,13 +643,22 @@ func (f *FileSystemIndex) RenameNode(oldPath string, oldName string, newPath str
 
 	// 1. 将字符串存入字节块
 	pOff, pLen, ppOff, ppHash := Store.PutPath(newPath)
-	nOff, nLen := Store.PutName(newName)
+	// 从完整路径中计算文件名的偏移量，避免重复存储
+	dirLen := len(newPath) - len(newName)
+	nOff := pOff + uint64(dirLen)
+
+	nLen := len(newName)
+	// 验证文件名长度不会溢出 uint16
+	if nLen > 65535 {
+		logger.Errorf("文件名过长: %s, 长度: %d", newName, nLen)
+		return
+	}
 	// 1. 处理节点本身数据
 	delete(PathMap, oldPathOff)
 	delete(PathHashIdMap, olfHash)
 
 	node.NameOff = nOff
-	node.NameLen = nLen
+	node.NameLen = uint16(nLen)
 	node.PathOff = pOff
 	node.PathLen = pLen
 
@@ -712,7 +741,7 @@ func (f *FileSystemIndex) RenameNode(oldPath string, oldName string, newPath str
 	searchCache.InvalidateByID(id)
 }
 
-func ApplyToMemory(n FileNode, path string) {
+func ApplyToMemory(n *FileNode, path string) {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -721,17 +750,25 @@ func ApplyToMemory(n FileNode, path string) {
 
 	// 2. 存入你的 StringStore (Store)，获取偏移量
 	// 这样 Nodes 里的 NameOff 和 NameLen 就恢复了
-	nOff, nLen := Store.PutName(name)
 	pOff, pLen, ppOff, pHash := Store.PutPath(path)
+	// 计算文件名在已存储路径中的偏移位置
+	dirLen := len(path) - len(name)
+	nOff := pOff + uint64(dirLen)
 
+	nLen := len(name)
+	// 验证文件名长度不会溢出 uint16
+	if nLen > 65535 {
+		logger.Errorf("文件名过长: %s, 长度: %d", name, nLen)
+		return
+	}
 	// 3. 更新 Node 字段
 	n.NameOff = nOff
-	n.NameLen = nLen
+	n.NameLen = uint16(nLen)
 	n.PathOff = pOff
 	n.PathLen = pLen
 
 	// 4. 填充 Nodes Map
-	Nodes[n.ID] = n
+	SetNode(n)
 
 	// 5. 恢复路径反查 ID 的 Map
 	PathMap[ppOff] = n.ID
@@ -754,23 +791,30 @@ func ApplyToMemory(n FileNode, path string) {
 	}
 }
 
-func ApplyToMemoryUnLock(n FileNode, path string) {
+func ApplyToMemoryUnLock(n *FileNode, path string) {
 	// 1. 提取文件名 (Name)
 	name := filepath.Base(path)
 
 	// 2. 存入你的 StringStore (Store)，获取偏移量
 	// 这样 Nodes 里的 NameOff 和 NameLen 就恢复了
-	nOff, nLen := Store.PutName(name)
 	pOff, pLen, ppOff, pHash := Store.PutPath(path)
-
+	// 计算文件名在已存储路径中的偏移位置
+	dirLen := len(path) - len(name)
+	nOff := pOff + uint64(dirLen)
+	nLen := len(name)
+	// 验证文件名长度不会溢出 uint16
+	if nLen > 65535 {
+		logger.Errorf("文件名过长: %s, 长度: %d", name, nLen)
+		return
+	}
 	// 3. 更新 Node 字段
 	n.NameOff = nOff
-	n.NameLen = nLen
+	n.NameLen = uint16(nLen)
 	n.PathOff = pOff
 	n.PathLen = pLen
 
 	// 4. 填充 Nodes Map
-	Nodes[n.ID] = n
+	SetNode(n)
 
 	// 5. 恢复路径反查 ID 的 Map
 	PathMap[ppOff] = n.ID

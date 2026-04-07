@@ -2,10 +2,15 @@ package main
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sys/unix"
 )
+
+func init() {
+	Cancel.Store(false)
+}
 
 // 2. 并行扫描与监听逻辑
 const (
@@ -94,6 +99,8 @@ var (
 	indexManager = NewIndexManager()
 
 	walMu sync.Mutex
+
+	Cancel atomic.Bool
 )
 
 func PutWd(offset uint64, wd int) {

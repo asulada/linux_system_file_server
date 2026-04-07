@@ -129,9 +129,9 @@ func ReplayWAL() {
 
 			switch op {
 			case OpUpsert:
-				ApplyToMemory(n, path)
+				ApplyToMemory(&n, path)
 			case OpUpdate:
-				UpdateNodeMetadata(n, path)
+				UpdateNodeMetadata(&n, path)
 			case OpDelete:
 				fileSystem.Remove(path, n.IsDir())
 			}
@@ -234,22 +234,20 @@ func MarkNodeInvalid(n FileNode, name string) {
 }
 
 // UpdateNodeMetadata 仅更新节点的元数据（用于 WAL 重放时的更新操作）
-func UpdateNodeMetadata(n FileNode, path string) {
+func UpdateNodeMetadata(n *FileNode, path string) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	// 通过路径查找节点 ID
-	pathOff, _ := GetPathOff(path)
-	id, ok := PathMap[pathOff]
+	// 直接通过 ID 查找节点（更高效）
+	node, ok := Nodes[n.ID]
 	if !ok {
 		// 节点不存在，降级为 Upsert
-		logger.Warn("WAL 重放：节点不存在，降级为 Upsert", path)
+		logger.Warn("WAL 重放：节点不存在，降级为 Upsert", zap.Uint64("id", n.ID), zap.String("path", path))
 		ApplyToMemoryUnLock(n, path)
 		return
 	}
 
 	// 获取现有节点
-	node := Nodes[id]
 	oldSize := node.Size
 
 	// 只更新元数据
@@ -258,15 +256,12 @@ func UpdateNodeMetadata(n FileNode, path string) {
 
 	// 更新父节点的 Size
 	if oldSize != n.Size {
-		fileSystem.UpsertParentSize(id, n.Size-oldSize)
+		fileSystem.UpsertParentSize(n.ID, n.Size-oldSize)
 	}
 
 	// 保存节点
 	SetNode(&node)
 
-	// 标记排序失效
-	//SizeSort = true
-	//NameSort = true
 }
 
 // SaveSnapshot 将当前内存中的所有数据全量备份到磁盘
@@ -365,7 +360,7 @@ func LoadSnapshot(filePath string) error {
 				atomic.StoreUint64(&lastID, realID)
 			}
 		} else {
-			ApplyToMemory(n, str)
+			ApplyToMemory(&n, str)
 		}
 	}
 	return nil
@@ -391,13 +386,20 @@ func RenameNodeRebuild(oldPath string, oldName string, newPath string, newName s
 
 	// 1. 将字符串存入字节块
 	pOff, pLen, ppOff, ppHash := Store.PutPath(newPath)
-	nOff, nLen := Store.PutName(newName)
+	// 从完整路径中计算文件名的偏移量，避免重复存储
+	dirLen := len(newPath) - len(newName)
+	nOff := pOff + uint64(dirLen)
+	nLen := len(newName)
+	if nLen > 65535 {
+		logger.Errorf("文件名过长: %s, 长度: %d", newName, nLen)
+		return
+	}
 	// 1. 处理节点本身数据
 	delete(PathMap, oldPathOff)
 	delete(PathHashIdMap, olfHash)
 
 	node.NameOff = nOff
-	node.NameLen = nLen
+	node.NameLen = uint16(nLen)
 	node.PathOff = pOff
 	node.PathLen = pLen
 
