@@ -69,7 +69,7 @@ var (
 	PathMap = make(map[uint64]uint64, 200000)
 	// 新增：路径哈希 -> 路径偏移量
 	// 因为 Key 是 uint64，Value 是 uint32，依然是纯数字，GC 会直接跳过扫描！
-	PathHashIdMap map[uint64]uint64 // 修改为嵌套 Map：ParentID -> {ChildID: struct{}}
+	PathHashIdMap = make(map[uint64]uint64, 200000) // 修改为嵌套 Map：ParentID -> {ChildID: struct{}}
 	TreeMap       = make(map[uint64]map[uint64]struct{}, 50000)
 	ChildTreeMap  = make(map[uint64]uint64, 50000)
 
