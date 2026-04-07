@@ -9,8 +9,8 @@ import (
 
 // 2. 并行扫描与监听逻辑
 const (
-	IndexMagic   = "IDX-GO125" // 魔数，标识文件类型
-	IndexVersion = 1           // 版本号，结构变更时升级
+	IndexMagic   = "IDXGO125" // 魔数，标识文件类型
+	IndexVersion = 1          // 版本号，结构变更时升级
 	watchMask    = unix.IN_MODIFY | unix.IN_CREATE | unix.IN_DELETE |
 		unix.IN_MOVE | unix.IN_ATTRIB | unix.IN_DELETE_SELF
 )

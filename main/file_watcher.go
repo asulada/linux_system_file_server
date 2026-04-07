@@ -742,7 +742,7 @@ func ApplyToMemory(n FileNode, path string) {
 
 	// 8. 维护全局最大 ID，确保新产生的 ID 不冲突
 	if n.GetRealID() > atomic.LoadUint64(&lastID) {
-		atomic.StoreUint64(&lastID, n.ID)
+		atomic.StoreUint64(&lastID, n.GetRealID())
 	}
 }
 
@@ -780,6 +780,6 @@ func ApplyToMemoryUnLock(n FileNode, path string) {
 
 	// 8. 维护全局最大 ID，确保新产生的 ID 不冲突
 	if n.GetRealID() > atomic.LoadUint64(&lastID) {
-		atomic.StoreUint64(&lastID, n.ID)
+		atomic.StoreUint64(&lastID, n.GetRealID)
 	}
 }

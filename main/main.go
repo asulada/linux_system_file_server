@@ -173,8 +173,6 @@ func create(context *gin.Context) {
 	OkResponse(context, http.StatusOK, "保存成功", nil)
 }
 func saveName(name string) {
-	mu.Lock()
-	defer mu.Unlock()
 	id := atomic.AddUint64(&lastID, 1)
 	nOff, nLen := Store.PutName(name)
 	node := FileNode{
