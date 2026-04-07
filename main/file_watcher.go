@@ -18,6 +18,13 @@ type OffsetStringChan struct {
 	path   string
 }
 
+func (f *FileSystemIndex) Close() {
+	if f.fd != 0 {
+		unix.Close(f.fd)
+		f.fd = 0
+	}
+}
+
 // 1 启动入口：根据 storageExists 判断加载模式
 func (f *FileSystemIndex) Start(roots []string, storagePath string) {
 	fd, _ := unix.InotifyInit()

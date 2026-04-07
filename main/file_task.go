@@ -52,7 +52,11 @@ func (f *FileSystemIndex) StartPersistenceTask(ctx context.Context, storagePath 
 
 		case <-ctx.Done():
 			// 如果父 context 被取消（用于程序内部逻辑退出）
-			SaveSnapshot(storagePath)
+			if err := SaveSnapshot(storagePath); err == nil {
+				walMu.Lock()
+				os.Remove(selfConfig.WalPath)
+				walMu.Unlock()
+			}
 			return
 		}
 	}
