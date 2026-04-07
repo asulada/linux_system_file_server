@@ -728,7 +728,7 @@ func ApplyToMemory(n FileNode, path string) {
 
 	// 5. 恢复路径反查 ID 的 Map
 	PathMap[ppOff] = n.ID
-	PathHashIdMap[pHash] = n.ID
+	PathHashIdMap[pHash] = ppOff
 
 	// 6. 恢复树形结构 (TreeMap)
 	if TreeMap[n.ParentID] == nil {
@@ -741,7 +741,45 @@ func ApplyToMemory(n FileNode, path string) {
 	indexManager.AddToIndex(name, n.ID)
 
 	// 8. 维护全局最大 ID，确保新产生的 ID 不冲突
-	if n.ID > atomic.LoadUint64(&lastID) {
+	if n.GetRealID() > atomic.LoadUint64(&lastID) {
+		atomic.StoreUint64(&lastID, n.ID)
+	}
+}
+
+func ApplyToMemoryUnLock(n FileNode, path string) {
+	// 1. 提取文件名 (Name)
+	name := filepath.Base(path)
+
+	// 2. 存入你的 StringStore (Store)，获取偏移量
+	// 这样 Nodes 里的 NameOff 和 NameLen 就恢复了
+	nOff, nLen := Store.PutName(name)
+	pOff, pLen, ppOff, pHash := Store.PutPath(path)
+
+	// 3. 更新 Node 字段
+	n.NameOff = nOff
+	n.NameLen = nLen
+	n.PathOff = pOff
+	n.PathLen = pLen
+
+	// 4. 填充 Nodes Map
+	Nodes[n.ID] = n
+
+	// 5. 恢复路径反查 ID 的 Map
+	PathMap[ppOff] = n.ID
+	PathHashIdMap[pHash] = ppOff
+
+	// 6. 恢复树形结构 (TreeMap)
+	if TreeMap[n.ParentID] == nil {
+		TreeMap[n.ParentID] = make(map[uint64]struct{})
+	}
+	TreeMap[n.ParentID][n.ID] = struct{}{}
+	ChildTreeMap[n.ID] = n.ParentID
+
+	// 7. 恢复搜索索引 (N-gram)
+	indexManager.AddToIndex(name, n.ID)
+
+	// 8. 维护全局最大 ID，确保新产生的 ID 不冲突
+	if n.GetRealID() > atomic.LoadUint64(&lastID) {
 		atomic.StoreUint64(&lastID, n.ID)
 	}
 }

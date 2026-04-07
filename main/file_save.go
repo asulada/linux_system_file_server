@@ -169,7 +169,7 @@ func UpdateNodeMetadata(n FileNode, path string) {
 	if !ok {
 		// 节点不存在，降级为 Upsert
 		logger.Warn("WAL 重放：节点不存在，降级为 Upsert", path)
-		ApplyToMemory(n, path)
+		ApplyToMemoryUnLock(n, path)
 		return
 	}
 
@@ -230,6 +230,10 @@ func SaveSnapshot(filePath string) error {
 
 // LoadSnapshot 从磁盘加载全量数据，恢复速度极快
 func LoadSnapshot(filePath string) error {
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		logger.Info("快照文件不存在，跳过加载", filePath)
+		return nil
+	}
 	f, err := os.Open(filePath) // 打开快照文件
 	if err != nil {
 		return err
@@ -498,11 +502,6 @@ func (w *WALAsyncWriter) writeEntry(entry *WALEntry) {
 	}
 
 	w.writer.Write(buf)
-
-	// 移除之前的条件刷新，改为定时刷新
-	// if w.writer.Buffered() > 32*1024 {
-	//     w.writer.Flush()
-	// }
 }
 
 // FlushWAL 强制刷新 WAL 缓冲区（用于 Checkpoint 前）

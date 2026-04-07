@@ -41,9 +41,9 @@ func (f *FileSystemIndex) StartPersistenceTask(ctx context.Context, storagePath 
 			start := time.Now()
 
 			CloseWAL()
-			if err := SaveSnapshot(storagePath); err != nil {
-				logger.Error("退出前保存失败: ", err)
-			}
+			//if err := SaveSnapshot(storagePath); err != nil {
+			//	logger.Error("退出前保存失败: ", err)
+			//}
 			logger.Infof("数据已安全持久化，耗时: %v", time.Since(start))
 			os.Exit(0)
 

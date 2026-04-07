@@ -126,7 +126,7 @@ func GetUint64(offset uint64, length uint16) uint64 {
 }
 
 func GetPathUint64(key uint64) string {
-	offset := (key >> 32)
+	offset := (key >> 16)
 	length := uint16(key & 0xFFFF)
 
 	// 这里会产生一个临时 string，但因为是按需产生，不会常驻堆区，不增加 GC 常驻压力
