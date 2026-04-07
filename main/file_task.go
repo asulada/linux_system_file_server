@@ -27,10 +27,6 @@ func (f *FileSystemIndex) StartPersistenceTask(ctx context.Context, storagePath 
 			logger.Infof("执行定时清理无用字节块...")
 			Store.Compact()
 
-			// 清理失效排序
-			logger.Infof("执行定时清理失效排序...")
-			f.SortCheckAndCompact()
-
 			// 定时保存
 			logger.Infof("执行定时自动保存...")
 			CheckAndCheckpoint()
@@ -40,10 +36,17 @@ func (f *FileSystemIndex) StartPersistenceTask(ctx context.Context, storagePath 
 			logger.Infof("n收到信号 [%v]，正在执行安全退出前的数据保存...", sig)
 			start := time.Now()
 
-			CloseWAL()
-			//if err := SaveSnapshot(storagePath); err != nil {
-			//	logger.Error("退出前保存失败: ", err)
-			//}
+			if err := SaveSnapshot(storagePath); err != nil {
+				logger.Error("退出前保存失败: ", err)
+			} else {
+				// 快照保存成功后，清理 WAL 文件
+				walMu.Lock()
+				if err := os.Remove(selfConfig.WalPath); err == nil {
+					logger.Info("WAL 文件已清理")
+				}
+				walMu.Unlock()
+			}
+
 			logger.Infof("数据已安全持久化，耗时: %v", time.Since(start))
 			os.Exit(0)
 
