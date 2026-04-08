@@ -33,6 +33,9 @@ func (f *FileSystemIndex) Start(roots []string, storagePath string) {
 	f.fd = fd
 	// 1. 尝试从二进制文件加载
 	err := LoadSnapshot(storagePath)
+	if err != nil {
+		logger.Errorw("加载失败", zap.Error(err))
+	}
 	ReplayWAL()
 
 	//加载到数据
