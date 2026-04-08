@@ -2,9 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"net/http"
+
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
-	"net/http"
 )
 
 // Standard response format
@@ -62,7 +63,7 @@ func ErrorHandlingMiddleware() gin.HandlerFunc {
 		defer func() {
 			if err := recover(); err != nil {
 				// Log the error (you might want to log to a file or monitoring service)
-				logger.Error("Recovered from panic: ", err)
+				logger.Errorw("Recovered from panic: ", zap.Any("panic_info", err))
 
 				// Send a unified error response
 				SendResponse(c, http.StatusInternalServerError, "Internal Server Error", nil)
@@ -75,7 +76,7 @@ func ErrorHandlingMiddleware() gin.HandlerFunc {
 		if len(c.Errors) > 0 {
 			// Log the errors
 			for _, e := range c.Errors {
-				logger.Error("Error: %v", e.Err)
+				logger.Errorw("Error", zap.Error(e.Err))
 			}
 
 			// Determine the response status code based on error type

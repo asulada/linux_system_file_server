@@ -10,6 +10,7 @@ import (
 	"time"
 	"unsafe"
 
+	"go.uber.org/zap"
 	"golang.org/x/sys/unix"
 )
 
@@ -94,7 +95,7 @@ func (f *FileSystemIndex) ParallelBFSScan(roots []string, scanChan chan<- *ScanR
 	for _, root := range roots {
 		info, err := os.Stat(root)
 		if err != nil {
-			logger.Error("根目录不可达", root, err)
+			logger.Errorw("根目录不可达", zap.Error(err), "path", root)
 			continue
 		}
 
@@ -121,11 +122,11 @@ func (f *FileSystemIndex) ParallelBFSScan(roots []string, scanChan chan<- *ScanR
 
 // doProcess 处理单个目录的扫描逻辑
 func (f *FileSystemIndex) doProcess(path string, taskQueue chan string, scanChan chan<- *ScanResult, wg *sync.WaitGroup) {
-	logger.Info("广度优先扫描：发现目录", path)
+	//logger.Info("广度优先扫描：发现目录", path)
 	// 使用 ReadDir 减少一次 os.Stat 调用
 	entries, err := os.ReadDir(path)
 	if err != nil {
-		logger.Error("读取目录失败", path, err)
+		zap.L().Error("读取目录失败", zap.Error(err), zap.String("path", path))
 		return
 	}
 
@@ -220,7 +221,7 @@ type ScanResult struct {
 func (f *FileSystemIndex) Upsert(path string) {
 	info, err := os.Stat(path)
 	if err != nil {
-		logger.Error("索引文件失败", path, err)
+		logger.Errorw("索引文件失败", zap.Error(err), "path", path)
 		return
 	}
 
@@ -520,20 +521,20 @@ func (f *FileSystemIndex) runEventLoop(fd int) {
 			fullPath := filepath.Join(dirPath, name)
 
 			if mask&(unix.IN_MOVED_FROM|unix.IN_MOVED_TO) != 0 {
-				logger.Info("处理移动事件：", event.Mask, fullPath)
+				zap.L().Info("处理移动事件：", zap.Uint32("mask", event.Mask), zap.String("path", fullPath))
 				f.handleMoveEvent(event, fullPath, fd, name, isDir, dirPath)
 			} else if mask&(unix.IN_DELETE_SELF) != 0 {
-				logger.Info("处理删除事件 1 ：", event.Mask, fullPath)
+				zap.L().Info("处理删除事件 1 ：", zap.Uint32("mask", event.Mask), zap.String("path", fullPath))
 				f.Remove(dirPath, isDir)
 			} else if mask&unix.IN_DELETE != 0 {
-				logger.Info("处理删除事件 2 ：", event.Mask, fullPath)
+				zap.L().Info("处理删除事件 2 ：", zap.Uint32("mask", event.Mask), zap.String("path", fullPath))
 				f.Remove(fullPath, isDir)
 			} else {
 				if isDir {
-					logger.Info("创建或更新目录 ", fullPath)
+					zap.L().Info("创建或更新目录", zap.String("path", fullPath))
 					f.UpsertDir(fullPath, name, dirPath, time.Now())
 				} else {
-					logger.Info("创建或更新文件 ", fullPath)
+					zap.L().Info("创建或更新文件 ", zap.String("path", fullPath))
 					f.Upsert(fullPath)
 				}
 			}
@@ -550,7 +551,7 @@ func (f *FileSystemIndex) addWatch(fd int, path string, offset uint64) {
 		//logger.Info("监听目录成功 ", fullPath, " wd ", wd)
 		PutWd(offset, wd)
 	} else {
-		logger.Error("监听目录失败", path, err)
+		zap.L().Error("监听目录失败", zap.Error(err), zap.String("path", path))
 	}
 }
 
@@ -562,7 +563,7 @@ func (f *FileSystemIndex) handleMoveEvent(event *unix.InotifyEvent, fullPath str
 
 	// 1. 处理移出 (FROM)
 	if (event.Mask & unix.IN_MOVED_FROM) != 0 {
-		logger.Info("目录移除", fullPath)
+		zap.L().Info("目录移除", zap.String("path", fullPath))
 		f.pendingMoves[event.Cookie] = &MoveEvent{
 			OldPath:  fullPath,
 			OldName:  fileName,
@@ -587,17 +588,17 @@ func (f *FileSystemIndex) handleMoveEvent(event *unix.InotifyEvent, fullPath str
 	// 2. 处理移入 (TO)
 	if (event.Mask & unix.IN_MOVED_TO) != 0 {
 		if move, exists := f.pendingMoves[event.Cookie]; exists {
-			logger.Info("目录移动", fullPath)
+			zap.L().Info("目录移动", zap.String("path", fullPath))
 			// 【核心优化】匹配成功：执行重命名而不是删除再新建
 			delete(f.pendingMoves, event.Cookie)
 			info, err := os.Stat(fullPath)
 			if err != nil {
-				logger.Error("文件不存在", fullPath)
+				zap.L().Error("文件不存在", zap.Error(err), zap.String("path", fullPath))
 				return
 			}
 			f.RenameNode(move.OldPath, move.OldName, fullPath, fileName, fd, move.OldPPath, pPath, info.ModTime().Unix())
 		} else {
-			logger.Info("目录移入", fullPath)
+			zap.L().Info("目录移入", zap.String("path", fullPath))
 			if isDir {
 				//f.UpsertDir(fullPath, fileName, filepath.Dir(fullPath), time.Now())
 				//f.addWatch(fd, fullPath)

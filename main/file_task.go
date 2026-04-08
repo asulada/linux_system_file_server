@@ -6,6 +6,8 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 // getNextRunTime 计算下一个执行时间（每天指定时刻）
@@ -59,7 +61,7 @@ func (f *FileSystemIndex) StartPersistenceTask(ctx context.Context, storagePath 
 			start := time.Now()
 
 			if err := SaveSnapshot(storagePath); err != nil {
-				logger.Error("退出前保存失败: ", err)
+				logger.Errorw("退出前保存失败: ", zap.Error(err))
 			} else {
 				// 快照保存成功后，清理 WAL 文件
 				walMu.Lock()

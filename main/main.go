@@ -43,6 +43,7 @@ func initLog() *zap.SugaredLogger {
 	}
 	// L()：获取全局logger
 	logger := zap.L()
+	zap.ReplaceGlobals(logger)
 	return logger.Sugar()
 }
 
@@ -66,11 +67,11 @@ func initConfig() {
 	v.SetDefault("log.isstdout", true)
 	v.SetDefault("dumpPath", "./dump")
 	if err := v.ReadInConfig(); err != nil {
-		logger.Error("err", err)
+		logger.Errorw("err", zap.Error(err))
 	}
 	//也可以直接反序列化为Struct
 	if err := v.Unmarshal(&selfConfig); err != nil {
-		logger.Error("err", err)
+		logger.Errorw("err", zap.Error(err))
 	}
 	selfConfig.WALThreshold *= 1024 * 1024
 	jwt.SetJwtSecret(selfConfig.JwtSecret)
@@ -218,7 +219,7 @@ func exportInvalid(context *gin.Context) {
 		"data":  invalidNodes,
 	}, "", "  ")
 	if err != nil {
-		logger.Error("JSON 序列化失败", err)
+		logger.Errorw("JSON 序列化失败", zap.Error(err))
 		SendResponse(context, http.StatusInternalServerError, "导出失败", nil)
 		return
 	}
@@ -247,7 +248,7 @@ func deleteFile(context *gin.Context) {
 	}
 	if err != nil {
 		OkResponse(context, http.StatusInternalServerError, "删除错误", err)
-		logger.Error(err)
+		logger.Errorw("", zap.Error(err))
 		return
 	}
 	SendResponse(context, http.StatusOK, "删除成功", err)
@@ -265,7 +266,7 @@ func deleteInvalid(context *gin.Context) {
 	case uint64:
 		nodeID = v
 	default:
-		logger.Error("无效的 ID 类型", id)
+		logger.Errorw("无效的 ID 类型", "id", id)
 		SendResponse(context, http.StatusBadRequest, "无效的 ID 类型", nil)
 		return
 	}
@@ -297,7 +298,7 @@ func TimingMiddleware() gin.HandlerFunc {
 		c.Next()
 
 		duration := time.Since(start)
-		logger.Info("接口耗时",
+		logger.Infow("接口耗时",
 			"path", c.Request.URL.Path,
 			"method", c.Request.Method,
 			"status", c.Writer.Status(),
@@ -310,6 +311,7 @@ func TimingMiddleware() gin.HandlerFunc {
 func main() {
 	initConfig()
 	logger = initLog()
+	defer logger.Sync() // 别忘了退出前刷新缓存
 
 	fileSystem = NewFileSystemIndex()
 	fileSystem.Start(selfConfig.Roots, selfConfig.DumpPath)
@@ -340,5 +342,4 @@ func main() {
 	logger.Info("9102端口启动成功")
 	//服务器端口
 	ginServer.Run(":9102") /*默认是8080*/
-
 }

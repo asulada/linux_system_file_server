@@ -21,7 +21,7 @@ func CheckAndCheckpoint() {
 		if os.IsNotExist(err) {
 			return
 		}
-		logger.Error("读取 WAL 状态失败", err)
+		logger.Errorw("读取 WAL 状态失败", zap.Error(err))
 		return
 	}
 
@@ -38,7 +38,7 @@ func CheckAndCheckpoint() {
 	// 注意：SaveSnapshot 内部会加 RLock，保证数据一致性
 	err = SaveSnapshot(selfConfig.DumpPath)
 	if err != nil {
-		logger.Error("快照保存失败，推迟清理 WAL", err)
+		logger.Errorw("快照保存失败，推迟清理 WAL", zap.Error(err))
 		return
 	}
 
@@ -49,7 +49,7 @@ func CheckAndCheckpoint() {
 
 	err = os.Remove(selfConfig.WalPath)
 	if err != nil {
-		logger.Error("清空 WAL 失败", err)
+		logger.Errorw("清空 WAL 失败", zap.Error(err))
 		return
 	}
 
@@ -99,32 +99,43 @@ func WriteWALInvalid(node *FileNode, path string) error {
 
 // ReplayWAL 从头读取日志文件并恢复内存状态
 func ReplayWAL() {
-	file, err := os.Open(selfConfig.WalPath) // 打开增量日志文件
+	file, err := os.Open(selfConfig.WalPath)
 	if err != nil {
 		return
-	} // 文件不存在说明没有增量，直接返回
+	}
 	defer file.Close()
 
-	br := bufio.NewReader(file) // 使用带缓冲的读取器，极大减少系统调用次数
+	br := bufio.NewReaderSize(file, 64*1024)
+	// 预分配缓冲区，减少循环内分配
+	tmp := make([]byte, 64)
+
 	for {
-		op, err := br.ReadByte() // 读取 1 字节操作码
+		op, err := br.ReadByte()
 		if err == io.EOF {
 			break
-		} // 读到文件末尾，重放结束
+		}
+		if err != nil {
+			logger.Errorw("读取 WAL 操作码失败", zap.Error(err))
+			break
+		}
 
 		switch op {
 		case OpUpsert, OpUpdate, OpDelete:
-			// 这三种操作需要完整的 Node 数据
+			// 基础结构：ID(8) + ParentID(8) + Size(8) + ModTime(8) + pLen(2) = 34 字节
+			if _, err := io.ReadFull(br, tmp[:34]); err != nil {
+				goto OffsetError
+			}
 			var n FileNode
-			binary.Read(br, binary.LittleEndian, &n.ID)
-			binary.Read(br, binary.LittleEndian, &n.ParentID)
-			binary.Read(br, binary.LittleEndian, &n.Size)
-			binary.Read(br, binary.LittleEndian, &n.ModTime)
+			n.ID = binary.LittleEndian.Uint64(tmp[0:8])
+			n.ParentID = binary.LittleEndian.Uint64(tmp[8:16])
+			n.Size = int64(binary.LittleEndian.Uint64(tmp[16:24]))
+			n.ModTime = int64(binary.LittleEndian.Uint64(tmp[24:32]))
+			pLen := binary.LittleEndian.Uint16(tmp[32:34])
 
-			var pLen uint16
-			binary.Read(br, binary.LittleEndian, &pLen)
 			pBuf := make([]byte, pLen)
-			io.ReadFull(br, pBuf)
+			if _, err := io.ReadFull(br, pBuf); err != nil {
+				goto OffsetError
+			}
 			path := string(pBuf)
 
 			switch op {
@@ -137,69 +148,72 @@ func ReplayWAL() {
 			}
 
 		case OpRename:
-			// 重命名操作：读取 ID、ModTime 和两个路径
-			var id uint64
-			binary.Read(br, binary.LittleEndian, &id)
+			// ID(8) + ModTime(8) + oldPLen(2) = 18 字节
+			if _, err := io.ReadFull(br, tmp[:18]); err != nil {
+				goto OffsetError
+			}
+			//id := binary.LittleEndian.Uint64(tmp[0:8])
+			modTime := int64(binary.LittleEndian.Uint64(tmp[8:16]))
+			oldPLen := binary.LittleEndian.Uint16(tmp[16:18])
 
-			// 读取 ModTime（uint64 转 int64）
-			var modTimeUint uint64
-			binary.Read(br, binary.LittleEndian, &modTimeUint)
-			modTime := int64(modTimeUint)
-
-			// 读取旧路径
-			var oldPLen uint16
-			binary.Read(br, binary.LittleEndian, &oldPLen)
 			oldPBuf := make([]byte, oldPLen)
-			io.ReadFull(br, oldPBuf)
+			if _, err := io.ReadFull(br, oldPBuf); err != nil {
+				goto OffsetError
+			}
 			oldPath := string(oldPBuf)
 
-			// 读取新路径
-			var newPLen uint16
-			binary.Read(br, binary.LittleEndian, &newPLen)
+			// 读新路径长度 (2字节)
+			if _, err := io.ReadFull(br, tmp[:2]); err != nil {
+				goto OffsetError
+			}
+			newPLen := binary.LittleEndian.Uint16(tmp[:2])
 			newPBuf := make([]byte, newPLen)
-			io.ReadFull(br, newPBuf)
+			if _, err := io.ReadFull(br, newPBuf); err != nil {
+				goto OffsetError
+			}
 			newPath := string(newPBuf)
 
-			// 调用 RenameNode 恢复重命名操作
-			oldName := filepath.Base(oldPath)
-			newName := filepath.Base(newPath)
-			oldPPath := filepath.Dir(oldPath)
-			newPPath := filepath.Dir(newPath)
-			RenameNodeRebuild(oldPath, oldName, newPath, newName, fileSystem.fd, oldPPath, newPPath, modTime)
+			RenameNodeRebuild(oldPath, filepath.Base(oldPath), newPath, filepath.Base(newPath), fileSystem.fd, filepath.Dir(oldPath), filepath.Dir(newPath), modTime)
+
 		case OpInvalid:
+			// ID(8) + ModTime(8) + pLen(2) = 18 字节
+			if _, err := io.ReadFull(br, tmp[:18]); err != nil {
+				goto OffsetError
+			}
 			var n FileNode
-			binary.Read(br, binary.LittleEndian, &n.ID)
+			n.ID = binary.LittleEndian.Uint64(tmp[0:8])
+			n.ModTime = int64(binary.LittleEndian.Uint64(tmp[8:16]))
+			pLen := binary.LittleEndian.Uint16(tmp[16:18])
 
-			var modTimeUint uint64
-			binary.Read(br, binary.LittleEndian, &modTimeUint)
-			n.ModTime = int64(modTimeUint)
-
-			var pLen uint16
-			binary.Read(br, binary.LittleEndian, &pLen)
 			pBuf := make([]byte, pLen)
-			io.ReadFull(br, pBuf)
-			path := string(pBuf)
+			if _, err := io.ReadFull(br, pBuf); err != nil {
+				goto OffsetError
+			}
+			MarkNodeInvalid(n, string(pBuf))
 
-			MarkNodeInvalid(n, path)
 		case OpInvalidDelete:
-			var id uint64
-			binary.Read(br, binary.LittleEndian, &id)
+			// ID(8) + ModTime(8) + nameLen(2) = 18 字节
+			if _, err := io.ReadFull(br, tmp[:18]); err != nil {
+				goto OffsetError
+			}
+			id := binary.LittleEndian.Uint64(tmp[0:8])
+			nameLen := binary.LittleEndian.Uint16(tmp[16:18])
 
-			var modTimeUint uint64
-			binary.Read(br, binary.LittleEndian, &modTimeUint)
-
-			var nameLen uint16
-			binary.Read(br, binary.LittleEndian, &nameLen)
 			nameBuf := make([]byte, nameLen)
-			io.ReadFull(br, nameBuf)
-			name := string(nameBuf)
-
-			DeleteInvalidNode(id, name)
+			if _, err := io.ReadFull(br, nameBuf); err != nil {
+				goto OffsetError
+			}
+			DeleteInvalidNode(id, string(nameBuf))
 
 		default:
-			logger.Warn("未知的 WAL 操作码", op)
+			zap.L().Warn("未知的 WAL 操作码", zap.Uint8("op", op))
+			return // 遇到未知操作码建议直接停止，防止后续数据错位
 		}
 	}
+	return
+
+OffsetError:
+	logger.Error("WAL 文件损坏或不完整，重放提前中止")
 }
 
 func DeleteInvalidNode(id uint64, name string) {
@@ -210,7 +224,7 @@ func DeleteInvalidNode(id uint64, name string) {
 
 	indexManager.RemoveFromIndex(name, id)
 
-	logger.Info("WAL 重放：已删除无效名称节点", zap.Uint64("id", id), zap.String("name", name))
+	zap.L().Info("WAL 重放：已删除无效名称节点", zap.Uint64("id", id), zap.String("name", name))
 }
 func MarkNodeInvalid(n FileNode, name string) {
 	mu.Lock()
@@ -242,7 +256,7 @@ func UpdateNodeMetadata(n *FileNode, path string) {
 	node, ok := Nodes[n.ID]
 	if !ok {
 		// 节点不存在，降级为 Upsert
-		logger.Warn("WAL 重放：节点不存在，降级为 Upsert", zap.Uint64("id", n.ID), zap.String("path", path))
+		zap.L().Warn("WAL 重放：节点不存在，降级为 Upsert", zap.Uint64("id", n.ID), zap.String("path", path))
 		ApplyToMemoryUnLock(n, path)
 		return
 	}
@@ -267,20 +281,38 @@ func UpdateNodeMetadata(n *FileNode, path string) {
 // SaveSnapshot 将当前内存中的所有数据全量备份到磁盘
 
 func SaveSnapshot(filePath string) error {
-	// 先写到 .tmp 临时文件，防止写入一半时崩溃导致旧快照损坏
+	// 1. 先统计有效节点数量，确保与加载时的 count 严格一致
+	var validNodes []*FileNode
+	for _, node := range Nodes {
+		if node.ID != 0 {
+			validNodes = append(validNodes, &node)
+		}
+	}
+
 	f, err := os.Create(filePath + ".tmp")
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
-	bw := bufio.NewWriter(f)     // 使用 4KB 缓冲区进行聚合写入
-	bw.Write([]byte(IndexMagic)) // 写入 8 字节魔数，校验文件合法性
+	// 建议加大缓冲区，提高长路径写入速度
+	bw := bufio.NewWriterSize(f, 64*1024)
 
-	// 写入当前内存中的节点总数（用于加载时预分配 Map 空间）
-	binary.Write(bw, binary.LittleEndian, uint32(len(Nodes)))
+	// 写入魔数
+	if _, err := bw.WriteString(IndexMagic); err != nil {
+		return err
+	}
 
-	for _, node := range Nodes {
+	// 写入【准确】的有效节点总数
+	if err := binary.Write(bw, binary.LittleEndian, uint32(len(validNodes))); err != nil {
+		return err
+	}
+
+	// 预定义填充字节，避免在循环内重复 make
+	padding := make([]byte, 7)
+
+	for _, node := range validNodes {
+		// 批量写入基础字段
 		binary.Write(bw, binary.LittleEndian, node.ID)
 		binary.Write(bw, binary.LittleEndian, node.ParentID)
 		binary.Write(bw, binary.LittleEndian, node.Size)
@@ -291,73 +323,116 @@ func SaveSnapshot(filePath string) error {
 			flags |= 0x01
 		}
 		bw.WriteByte(flags)
-		bw.Write(make([]byte, 7))
+		bw.Write(padding) // 使用复用的填充切片
 
+		// 获取名称字符串
+		var name string
 		if node.Invalid {
-			name := Store.Get(node.NameOff, node.NameLen)
-			nBuf := []byte(name)
-			binary.Write(bw, binary.LittleEndian, uint16(len(nBuf)))
-			bw.Write(nBuf)
+			name = Store.Get(node.NameOff, node.NameLen)
 		} else {
-			path := Store.Get(node.PathOff, node.PathLen)
-			pBuf := []byte(path)
-			binary.Write(bw, binary.LittleEndian, uint16(len(pBuf)))
-			bw.Write(pBuf)
+			name = Store.Get(node.PathOff, node.PathLen)
 		}
+
+		if name == "" && !node.Invalid {
+			zap.L().Error("节点路径为空", zap.Uint64("id", node.ID))
+		}
+
+		// 写入名称
+		nBuf := []byte(name)
+		binary.Write(bw, binary.LittleEndian, uint16(len(nBuf)))
+		bw.Write(nBuf)
 	}
-	bw.Flush() // 确保缓冲区剩余数据全部进入磁盘
+
+	// 极其重要：必须检查 Flush 错误
+	if err := bw.Flush(); err != nil {
+		return err
+	}
+
+	// 显式关闭文件以确保句柄释放（Rename 前必须关闭）
 	f.Close()
-	return os.Rename(filePath+".tmp", filePath) // 原子重命名，替换旧快照
+
+	// 原子替换
+	return os.Rename(filePath+".tmp", filePath)
 }
 
 // LoadSnapshot 从磁盘加载全量数据，恢复速度极快
 func LoadSnapshot(filePath string) error {
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		logger.Info("快照文件不存在，跳过加载", filePath)
+		logger.Infow("快照文件不存在，跳过加载", "path", filePath)
 		return nil
 	}
-	f, err := os.Open(filePath) // 打开快照文件
+	f, err := os.Open(filePath)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
-	br := bufio.NewReader(f) // 带缓冲读取
-	magic := make([]byte, 8)
-	io.ReadFull(br, magic) // 读取前 8 字节魔数
-	if string(magic) != IndexMagic {
-		return fmt.Errorf("invalid snapshot")
+	// 1. 增大缓冲区至 256KB，减少系统调用，长路径表现更佳
+	br := bufio.NewReaderSize(f, 256*1024)
+
+	// 2. 预分配一个通用复用缓存 (足以容纳 Magic, Count 和节点基础头部)
+	// 节点基础头部：ID(8)+PID(8)+Size(8)+Time(8)+Flag(1)+Padding(7)+Len(2) = 42 字节
+	tmpBuf := make([]byte, 64)
+
+	// 读取并校验魔数 (8字节)
+	if _, err := io.ReadFull(br, tmpBuf[:8]); err != nil {
+		return fmt.Errorf("read magic failed: %v", err)
+	}
+	if string(tmpBuf[:8]) != IndexMagic {
+		return fmt.Errorf("invalid snapshot magic")
 	}
 
-	var count uint32
-	binary.Read(br, binary.LittleEndian, &count) // 读取节点总数
+	// 读取总数 (4字节 uint32)
+	if _, err := io.ReadFull(br, tmpBuf[:4]); err != nil {
+		return fmt.Errorf("read count failed: %v", err)
+	}
+	count := binary.LittleEndian.Uint32(tmpBuf[:4])
 
 	for i := uint32(0); i < count; i++ {
 		var n FileNode
-		binary.Read(br, binary.LittleEndian, &n.ID)
-		binary.Read(br, binary.LittleEndian, &n.ParentID)
-		binary.Read(br, binary.LittleEndian, &n.Size)
-		binary.Read(br, binary.LittleEndian, &n.ModTime)
 
-		flags, _ := br.ReadByte()
-		n.Invalid = (flags & 0x01) != 0
-		br.Read(make([]byte, 7))
+		// 3. 一次性读取节点所有固定长度字段 (42 字节)
+		// 这样可以彻底规避缓冲区边界错位问题
+		if _, err := io.ReadFull(br, tmpBuf[:42]); err != nil {
+			return fmt.Errorf("node %d: read header failed: %v", i, err)
+		}
 
-		var strLen uint16
-		binary.Read(br, binary.LittleEndian, &strLen)
+		// 手动解析（无反射，极快）
+		n.ID = binary.LittleEndian.Uint64(tmpBuf[0:8])
+		n.ParentID = binary.LittleEndian.Uint64(tmpBuf[8:16])
+		n.Size = int64(binary.LittleEndian.Uint64(tmpBuf[16:24]))
+		n.ModTime = int64(binary.LittleEndian.Uint64(tmpBuf[24:32]))
+
+		// Flag 位在第 32 字节
+		n.Invalid = (tmpBuf[32] & 0x01) != 0
+
+		// 33-39 字节是 Padding (Discard 7)，直接无视
+
+		// 40-41 字节是 NameLen (uint16)
+		strLen := binary.LittleEndian.Uint16(tmpBuf[40:42])
+
+		// 4. 处理字符串 (长路径核心)
 		strBuf := make([]byte, strLen)
-		io.ReadFull(br, strBuf)
+		if _, err := io.ReadFull(br, strBuf); err != nil {
+			return fmt.Errorf("node %d: read name failed: %v", i, err)
+		}
 		str := string(strBuf)
 
+		// 5. 业务逻辑
 		if n.Invalid {
 			nOff, nLen := Store.PutName(str)
 			n.NameOff = nOff
 			n.NameLen = nLen
 			SetNode(&n)
 			indexManager.AddToIndex(str, n.ID)
-			realID := n.GetRealID()
-			if realID > atomic.LoadUint64(&lastID) {
-				atomic.StoreUint64(&lastID, realID)
+
+			// 线程安全地更新最大 ID
+			newID := n.GetRealID()
+			for {
+				current := atomic.LoadUint64(&lastID)
+				if newID <= current || atomic.CompareAndSwapUint64(&lastID, current, newID) {
+					break
+				}
 			}
 		} else {
 			ApplyToMemory(&n, str)
@@ -417,7 +492,7 @@ func RenameNodeRebuild(oldPath string, oldName string, newPath string, newName s
 	newParentID, exists := PathMap[parentOff]
 	if !exists {
 		// 如果新父节点不存在，说明是跨根目录移动或父节点已被删除
-		logger.Error("新父节点不存在", newPPath)
+		logger.Errorw("新父节点不存在", "path", newPPath)
 		return
 	}
 	// 更新为新父节点的引用
@@ -566,7 +641,7 @@ func (w *WALAsyncWriter) writeEntry(entry *WALEntry) {
 	if w.file == nil {
 		f, err := os.OpenFile(selfConfig.WalPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
-			logger.Error("打开 WAL 文件失败", err)
+			logger.Errorw("打开 WAL 文件失败", zap.Error(err))
 			return
 		}
 		w.file = f
