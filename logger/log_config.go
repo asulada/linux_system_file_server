@@ -2,13 +2,15 @@ package logger
 
 import (
 	"fmt"
-	"github.com/natefinch/lumberjack"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/natefinch/lumberjack"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 type LogConfig struct {
@@ -19,6 +21,61 @@ type LogConfig struct {
 	MaxBackups   int    `json:"max_backups"`    // MaxBackups 是要保留的旧日志文件的最大数量。默认是保留所有旧的日志文件（尽管 MaxAge 可能仍会导致它们被删除。）
 	IsStdout     bool   `json:"is_stdout"`      // IsStdout 是否输出到控制台
 	IsStackTrace bool   `json:"is_stack_trace"` // IsStackTrace 是否输出堆栈信息
+}
+
+// dailyRotateWriter 实现了按天滚动的日志写入器
+type dailyRotateWriter struct {
+	baseFilename string // 基础文件名（不含日期）
+	ext          string // 文件扩展名
+	currentDate  string // 当前日期
+	currentFile  *lumberjack.Logger
+	maxSize      int
+	maxBackups   int
+	maxAge       int
+	isStdout     bool
+	mu           sync.Mutex
+}
+
+// Write 实现 io.Writer 接口
+func (w *dailyRotateWriter) Write(p []byte) (n int, err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	// 检查日期是否变化
+	now := time.Now()
+	today := now.Format("2006-01-02")
+
+	if today != w.currentDate {
+		// 日期变化，关闭旧文件并创建新文件
+		if w.currentFile != nil {
+			w.currentFile.Close()
+		}
+		w.currentDate = today
+		w.currentFile = w.createLogger()
+	}
+
+	return w.currentFile.Write(p)
+}
+
+// Sync 实现 zapcore.WriteSyncer 接口
+// lumberjack.Logger 本身不支持 Sync，这里不做任何操作
+func (w *dailyRotateWriter) Sync() error {
+	// lumberjack 内部会在每次 Write 后自动 flush
+	// 如果需要强制落盘，可以在应用退出时调用 Close()
+	return nil
+}
+
+// createLogger 创建新的 lumberjack.Logger 实例
+func (w *dailyRotateWriter) createLogger() *lumberjack.Logger {
+	dailyFilename := fmt.Sprintf("%s.%s%s", w.baseFilename, w.currentDate, w.ext)
+
+	return &lumberjack.Logger{
+		Filename:   dailyFilename,
+		MaxSize:    w.maxSize,
+		MaxAge:     w.maxAge,
+		MaxBackups: w.maxBackups,
+		Compress:   false,
+	}
 }
 
 // InitLogger 初始化Logger
@@ -56,26 +113,28 @@ func TimeEncoder(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
 
 // 负责日志写入的位置
 func getLogWriter(filename string, maxsize, maxBackup, maxAge int, isStdout bool) zapcore.WriteSyncer {
-	// 动态生成带日期的文件名
-	currentDate := time.Now().Format("2006-01-02")
+	ext := filepath.Ext(filename)
+	nameWithoutExt := strings.TrimSuffix(filename, ext)
 
-	// 分离文件名和后缀
-	ext := filepath.Ext(filename)                       // 获取文件后缀（如 .log）
-	nameWithoutExt := strings.TrimSuffix(filename, ext) // 去掉后缀的文件名
-
-	// 拼接新的文件名：name + date + ext
-	dailyFilename := fmt.Sprintf("%s.%s%s", nameWithoutExt, currentDate, ext)
-
-	lumberJackLogger := &lumberjack.Logger{
-		Filename:   dailyFilename, // 文件名包含日期
-		MaxSize:    maxsize,       // 进行切割之前,日志文件的最大大小(MB为单位)
-		MaxAge:     maxAge,        // 保留旧文件的最大天数
-		MaxBackups: maxBackup,     // 保留旧文件的最大个数
-		Compress:   false,         // 是否压缩/归档旧文件
+	rotateWriter := &dailyRotateWriter{
+		baseFilename: nameWithoutExt,
+		ext:          ext,
+		currentDate:  time.Now().Format("2006-01-02"),
+		maxSize:      maxsize,
+		maxBackups:   maxBackup,
+		maxAge:       maxAge,
+		isStdout:     isStdout,
 	}
+
+	rotateWriter.currentFile = rotateWriter.createLogger()
+
 	if isStdout {
-		return zapcore.NewMultiWriteSyncer(zapcore.AddSync(lumberJackLogger), zapcore.AddSync(os.Stdout))
-	} else {
-		return zapcore.AddSync(lumberJackLogger)
+		// dailyRotateWriter 已实现 WriteSyncer 接口，直接使用
+		return zapcore.NewMultiWriteSyncer(
+			rotateWriter,
+			zapcore.AddSync(os.Stdout),
+		)
 	}
+	// 直接返回，因为 dailyRotateWriter 已经实现了 WriteSyncer
+	return rotateWriter
 }

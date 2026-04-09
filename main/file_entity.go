@@ -16,8 +16,8 @@ func init() {
 const (
 	IndexMagic   = "IDXGO125" // 魔数，标识文件类型
 	IndexVersion = 1          // 版本号，结构变更时升级
-	watchMask    = unix.IN_MODIFY | unix.IN_CREATE | unix.IN_DELETE |
-		unix.IN_MOVE | unix.IN_ATTRIB | unix.IN_DELETE_SELF
+	watchMask    = unix.IN_CLOSE_WRITE | unix.IN_CREATE | unix.IN_DELETE |
+		unix.IN_MOVE | unix.IN_DELETE_SELF
 )
 
 // FileNode 存储在内存中的详细信息
@@ -27,8 +27,7 @@ type FileNode struct {
 
 	Size    int64
 	ModTime int64
-	//IsDir   bool
-	//是否无效文件
+	//是否是虚拟的文件名
 	Invalid bool
 
 	// 指向字节块的偏移量和长度
@@ -131,13 +130,19 @@ type FileSystemIndex struct {
 
 // 根据 路径 的 偏移量 和 长度 获取 uint64 数字
 func GetUint64(offset uint64, length uint16) uint64 {
-	return (offset)<<16 | uint64(length)
+	if offset > (1<<48)-1 {
+		panic("offset overflow: exceeds 48-bit limit")
+	}
+	return offset<<16 | uint64(length)
 }
 
 func GetPathUint64(key uint64) string {
 	offset := (key >> 16)
 	length := uint16(key & 0xFFFF)
 
+	if length == 0 {
+		return ""
+	}
 	// 这里会产生一个临时 string，但因为是按需产生，不会常驻堆区，不增加 GC 常驻压力
 	return Store.Get(offset, length)
 }

@@ -216,7 +216,7 @@ func exportInvalid(context *gin.Context) {
 
 	jsonData, err := json.MarshalIndent(gin.H{
 		"count": len(invalidNodes),
-		"data":  invalidNodes,
+		"names": invalidNodes,
 	}, "", "  ")
 	if err != nil {
 		logger.Errorw("JSON 序列化失败", zap.Error(err))

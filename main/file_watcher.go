@@ -236,6 +236,11 @@ func (f *FileSystemIndex) Upsert(path string) {
 	if offset != 0 {
 		if id, exists := PathMap[offset]; exists {
 			node := Nodes[id]
+			// 【核心优化 1】：比对元数据
+			// 如果大小和修改时间都没变，说明是无效触发（如 Win10 仅打开查看）
+			if node.Size == info.Size() && node.ModTime == info.ModTime().Unix() {
+				return
+			}
 			oldSize := node.Size
 			node.Size = info.Size()
 
@@ -489,6 +494,54 @@ func (f *FileSystemIndex) ignoreSuffix(name string) bool {
 	return false
 }
 
+func getEventNames(mask uint32) string {
+	var events []string
+	if mask&unix.IN_ACCESS != 0 {
+		events = append(events, "ACCESS")
+	}
+	if mask&unix.IN_MODIFY != 0 {
+		events = append(events, "MODIFY")
+	}
+	if mask&unix.IN_ATTRIB != 0 {
+		events = append(events, "ATTRIB")
+	}
+	if mask&unix.IN_CLOSE_WRITE != 0 {
+		events = append(events, "CLOSE_WRITE")
+	}
+	if mask&unix.IN_CLOSE_NOWRITE != 0 {
+		events = append(events, "CLOSE_NOWRITE")
+	}
+	if mask&unix.IN_OPEN != 0 {
+		events = append(events, "OPEN")
+	}
+	if mask&unix.IN_MOVED_FROM != 0 {
+		events = append(events, "MOVED_FROM")
+	}
+	if mask&unix.IN_MOVED_TO != 0 {
+		events = append(events, "MOVED_TO")
+	}
+	if mask&unix.IN_CREATE != 0 {
+		events = append(events, "CREATE")
+	}
+	if mask&unix.IN_DELETE != 0 {
+		events = append(events, "DELETE")
+	}
+	if mask&unix.IN_DELETE_SELF != 0 {
+		events = append(events, "DELETE_SELF")
+	}
+	if mask&unix.IN_MOVE_SELF != 0 {
+		events = append(events, "MOVE_SELF")
+	}
+	if mask&unix.IN_ISDIR != 0 {
+		events = append(events, "ISDIR")
+	}
+
+	if len(events) == 0 {
+		return "UNKNOWN"
+	}
+	return strings.Join(events, "|")
+}
+
 // 4. Watcher 核心：Inotify 事件循环
 func (f *FileSystemIndex) runEventLoop(fd int) {
 	buf := make([]byte, 4096)
@@ -517,6 +570,8 @@ func (f *FileSystemIndex) runEventLoop(fd int) {
 			if f.ignoreSuffix(name) {
 				continue
 			}
+			// 解析事件名称
+			eventDesc := getEventNames(mask)
 
 			parentOffset := GetWdPath(int(event.Wd))
 			isDir := (mask & unix.IN_ISDIR) != 0
@@ -524,20 +579,20 @@ func (f *FileSystemIndex) runEventLoop(fd int) {
 			fullPath := filepath.Join(dirPath, name)
 
 			if mask&(unix.IN_MOVED_FROM|unix.IN_MOVED_TO) != 0 {
-				zap.L().Info("处理移动事件：", zap.Uint32("mask", event.Mask), zap.String("path", fullPath))
+				zap.L().Info("处理移动事件", zap.Uint32("mask", event.Mask), zap.String("事件", eventDesc), zap.String("path", fullPath))
 				f.handleMoveEvent(event, fullPath, fd, name, isDir, dirPath)
 			} else if mask&(unix.IN_DELETE_SELF) != 0 {
-				zap.L().Info("处理删除事件 1 ：", zap.Uint32("mask", event.Mask), zap.String("path", fullPath))
+				zap.L().Info("处理删除事件 1", zap.Uint32("mask", event.Mask), zap.String("事件", eventDesc), zap.String("path", fullPath))
 				f.Remove(dirPath, isDir)
 			} else if mask&unix.IN_DELETE != 0 {
-				zap.L().Info("处理删除事件 2 ：", zap.Uint32("mask", event.Mask), zap.String("path", fullPath))
+				zap.L().Info("处理删除事件 2", zap.Uint32("mask", event.Mask), zap.String("事件", eventDesc), zap.String("path", fullPath))
 				f.Remove(fullPath, isDir)
 			} else {
 				if isDir {
-					zap.L().Info("创建或更新目录", zap.String("path", fullPath))
+					zap.L().Info("创建或更新目录", zap.String("事件", eventDesc), zap.String("path", fullPath))
 					f.UpsertDir(fullPath, name, dirPath, time.Now())
 				} else {
-					zap.L().Info("创建或更新文件 ", zap.String("path", fullPath))
+					zap.L().Info("创建或更新文件", zap.String("事件", eventDesc), zap.String("path", fullPath))
 					f.Upsert(fullPath)
 				}
 			}
