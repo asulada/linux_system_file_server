@@ -323,6 +323,15 @@ func main() {
 	ginServer.Use(ErrorHandlingMiddleware())
 	ginServer.Use(TimingMiddleware())
 
+	// 设置静态文件目录，将 /static 路径映射到 static 文件夹
+	ginServer.Static("/static", "./static")
+
+	// 设置根路径默认访问 index-go.html
+	ginServer.LoadHTMLGlob("static/*")
+	ginServer.GET("/", func(c *gin.Context) {
+		c.HTML(http.StatusOK, "index-go.html", gin.H{})
+	})
+
 	// 自定义404错误处理
 	ginServer.NoRoute(func(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{
