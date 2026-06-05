@@ -19,6 +19,7 @@ func CheckAndCheckpoint() {
 	info, err := os.Stat(selfConfig.WalPath)
 	if err != nil {
 		if os.IsNotExist(err) {
+			logger.Warn("WAL 文件不存在")
 			return
 		}
 		logger.Errorw("读取 WAL 状态失败", zap.Error(err))
@@ -29,6 +30,7 @@ func CheckAndCheckpoint() {
 	FlushWAL()
 	// 2. 如果文件没超过阈值，直接返回
 	if info.Size() < selfConfig.WALThreshold {
+		logger.Infof("WAL 文件大小 %d 小于阈值 %d，无需执行 Checkpoint", info.Size(), selfConfig.WALThreshold)
 		return
 	}
 
@@ -101,6 +103,10 @@ func WriteWALInvalid(node *FileNode, path string) error {
 func ReplayWAL() {
 	file, err := os.Open(selfConfig.WalPath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			logger.Warn("WAL 文件不存在，跳过重放") // ← 添加这行
+		}
+		logger.Errorw("打开 WAL 文件失败", zap.Error(err))
 		return
 	}
 	defer file.Close()

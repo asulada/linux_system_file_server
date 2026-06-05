@@ -6,10 +6,12 @@ import (
 
 // SearchRequest 搜索请求参数
 type SearchReq struct {
-	Keywords []string `json:"key"`
-	SortBy   string   `json:"sortBy"` // "time", "size", "name"
-	Offset   int      `json:"offset"`
-	Limit    int      `json:"limit"`
+	Keywords  []string `json:"key"`
+	SortBy    int      `json:"sortBy"`    // 0:时间, 1:名称, 2:大小
+	SortOrder int      `json:"sortOrder"` // 0:降序, 1:升序
+	Offset    int      `json:"offset"`
+	Limit     int      `json:"limit"`
+	FileType  int      `json:"fileType"` // 0:全部, 1:仅文件夹, 2:仅文件
 }
 
 type SearchResult struct {
@@ -43,15 +45,16 @@ func NewSeachResult(name string, node *FileNode) *SearchResult {
 // SearchPaged 分页多关键词搜索
 
 func (f *FileSystemIndex) Search(req SearchReq) *SearchRes {
-	pageResult := indexManager.Search(req.Keywords, req.SortBy, req.Offset, req.Limit)
+	pageResult := indexManager.Search(req.Keywords, req.SortBy, req.SortOrder, req.Offset, req.Limit, req.FileType)
 
 	results := make([]*SearchResult, 0, len(pageResult.IDs))
 
 	if len(pageResult.IDs) == 0 {
+		logger.Info("无结果")
 		return &SearchRes{
 			Results: results,
 			Offset:  pageResult.Total,
-			Total:   pageResult.Total,
+			Total:   0,
 		}
 	}
 

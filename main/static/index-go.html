@@ -1,0 +1,1141 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no"/>
+    <link rel="stylesheet" href="https://cdn-swg.swagger.vip/css/element-ui-2.15.10.css">
+    <script src="https://cdn-swg.swagger.vip/js/vue-2.7.10.js"></script>
+    <script src="https://cdn-swg.swagger.vip/js/element-ui-2.15.10.js"></script>
+    <script src="https://cdn-swg.swagger.vip/js/axios.min.js"></script>
+    <style>
+        body, html {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            margin: 0;
+            padding: 0;
+        }
+
+        input[aria-hidden=true] {
+            display: none !important;
+        }
+
+        .highlight {
+            background-color: yellow;
+            color: red;
+            font-weight: bold;
+            border-radius: 2px;
+        }
+
+        /* 移动端适配样式 */
+        @media screen and (max-width: 768px) {
+            body {
+                overflow-x: hidden;
+            }
+
+            #app {
+                width: 100% !important;
+                margin-top: 8px !important;
+                padding: 0 8px;
+                box-sizing: border-box;
+            }
+
+            .el-container {
+                width: 100%;
+            }
+
+            .el-header {
+                padding: 10px 0 !important;
+                height: auto !important;
+            }
+
+            .el-main {
+                padding: 10px 0 !important;
+                overflow-x: hidden;
+            }
+
+            /* 表单响应式 */
+            .demo-form-inline .el-form-item {
+                margin-bottom: 12px;
+            }
+
+            .demo-form-inline .el-form-item__label {
+                font-size: 13px;
+                padding-right: 8px;
+            }
+
+            .demo-form-inline .el-input__inner {
+                font-size: 14px;
+                height: 36px;
+                line-height: 36px;
+            }
+
+            /* 按钮适配 */
+            .el-button--small {
+                padding: 8px 12px;
+                font-size: 13px;
+                height: 36px;
+            }
+
+            .el-button--medium {
+                padding: 10px 16px;
+                font-size: 14px;
+            }
+
+            .el-radio-button__inner {
+                padding: 6px 12px;
+                font-size: 12px;
+            }
+
+            /* 表格移动端优化 */
+            .el-table {
+                font-size: 12px;
+                width: 100% !important;
+            }
+
+            .el-table th {
+                padding: 8px 0;
+                font-size: 12px;
+            }
+
+            .el-table td {
+                padding: 8px 0;
+            }
+
+            .el-table__cell {
+                padding: 6px 4px;
+            }
+
+            /* 隐藏不必要的列 */
+            .mobile-hide {
+                display: none !important;
+            }
+
+            /* 操作按钮优化 */
+            .el-table .el-button--small {
+                padding: 4px 8px;
+                font-size: 11px;
+            }
+
+            /* 分页适配 */
+            .pagination-container {
+                text-align: center !important;
+                padding: 10px 0;
+            }
+
+            .el-pagination {
+                font-size: 12px;
+            }
+
+            .el-pagination button,
+            .el-pagination span:not([class*=suffix]) {
+                padding: 0 4px;
+                font-size: 12px;
+                min-width: 28px;
+            }
+
+            .el-pagination__sizes {
+                display: none;
+            }
+
+            .el-pagination__jump {
+                display: none;
+            }
+
+            /* 对话框适配 */
+            .el-dialog {
+                width: 90% !important;
+                margin: 10vh auto !important;
+            }
+
+            .el-dialog__body {
+                padding: 15px;
+            }
+
+            .el-form-item__label {
+                font-size: 13px;
+            }
+
+            /* 折叠面板适配 */
+            .el-collapse-item__header {
+                font-size: 13px;
+                padding: 10px 15px;
+            }
+
+            .el-collapse-item__content {
+                padding: 10px 15px;
+            }
+
+            /* 关键词显示框 */
+            .keyword-display-mobile {
+                padding: 6px 10px;
+                background: #f0f9ff;
+                border-left: 3px solid #409eff;
+                border-radius: 4px;
+                font-size: 12px;
+                margin-top: 8px;
+            }
+
+            /* 触摸优化 */
+            .el-button {
+                min-height: 40px;
+                min-width: 40px;
+            }
+
+            .el-input__inner {
+                min-height: 40px;
+            }
+
+            .el-table__row {
+                min-height: 44px;
+            }
+        }
+
+        /* 超小屏幕适配 */
+        @media screen and (max-width: 480px) {
+            #app {
+                margin-top: 5px !important;
+                padding: 0 5px;
+            }
+
+            .demo-form-inline .el-form-item__content {
+                margin-left: 60px !important;
+            }
+
+            .el-button {
+                margin: 2px;
+            }
+
+            .el-table__expand-icon {
+                display: none;
+            }
+
+            .el-dialog {
+                width: 95% !important;
+            }
+
+            /* 进一步简化分页 */
+            .el-pagination__total {
+                display: none;
+            }
+        }
+
+        /* 横向滚动提示 */
+        .mobile-scroll-hint {
+            display: none;
+            text-align: center;
+            padding: 5px;
+            font-size: 12px;
+            color: #909399;
+            background: #f5f7fa;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+
+        @media screen and (max-width: 768px) {
+            .mobile-scroll-hint {
+                display: block;
+            }
+        }
+
+        /* 移动端表格容器 */
+        .mobile-table-wrapper {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        /* 触摸反馈 */
+        @media (hover: none) and (pointer: coarse) {
+            .el-button:active {
+                opacity: 0.8;
+                transform: scale(0.98);
+            }
+
+            .el-table__row:active {
+                background-color: #f5f7fa;
+            }
+        }
+
+        /* 防止文本选择干扰触摸 */
+        .el-table {
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        .el-button {
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* 表格样式优化 */
+        .el-table {
+            font-size: 14px;
+        }
+
+        .el-table th {
+            padding: 10px 0;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .el-table td {
+            padding: 10px 0;
+        }
+
+        .el-table__cell {
+            padding: 6px 10px;
+        }
+
+        .el-table__row {
+            height: 44px;
+        }
+
+        /* 隐藏不必要的列 */
+        .mobile-hide {
+            display: none !important;
+        }
+
+        /* 移动端表格横向滚动优化 */
+        .mobile-table-wrapper {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            padding-bottom: 10px;
+        }
+
+        /* 确保固定列在移动端也正常工作 */
+        .el-table__fixed {
+            box-shadow: 2px 0 8px rgba(0, 0, 0, 0.15);
+        }
+
+        .el-table__fixed-right {
+            box-shadow: -2px 0 8px rgba(0, 0, 0, 0.15);
+        }
+
+        .demo-form-inline .el-input__inner {
+            font-size: 14px;
+            height: 32px;
+            line-height: 32px;
+        }
+
+        /* 按钮适配 */
+        .el-button--small {
+            padding: 8px 12px;
+            font-size: 13px;
+            height: 32px;
+            line-height: 1;
+        }
+
+        .el-button {
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* 去除Element UI默认按钮间距 */
+        .el-button + .el-button {
+            margin-left: 0 !important;
+        }
+
+    </style>
+
+</head>
+<body style="display: flex;
+    justify-content: center;">
+<div id="app" style="width: 96%;margin-top: 14px;">
+    <template>
+        <div v-loading="loading" style="height: 100%">
+            <el-container>
+                <el-header style="height: unset">
+                    <el-form :model="listQuery" class="demo-form-inline" @submit.native.prevent
+                             :label-width="isMobile ? '60px' : '80px'" :size="isMobile ? 'mini' : 'small'">
+                        <el-row :gutter="isMobile ? 8 : 20">
+                            <el-col :xs="24" :sm="16" :md="18" :lg="18">
+                                <el-form-item label="文件名">
+                                    <el-input v-model="listQuery.key" placeholder="输入名称"
+                                              @keyup.enter.native="handleSearch"
+                                              clearable
+                                              :size="isMobile ? 'small' : 'small'">
+                                        <el-button slot="append" icon="el-icon-search" @click="handleSearch"
+                                                   size="small">搜索
+                                        </el-button>
+                                    </el-input>
+                                </el-form-item>
+                            </el-col>
+                            <el-col :xs="24" :sm="8" :md="6" :lg="6" style="margin-top: 0;">
+                                <el-button type="success" icon="el-icon-document-copy" @click="getClipboardContent"
+                                           style="width: 100%;" size="small">
+                                    粘贴搜索
+                                </el-button>
+                            </el-col>
+                        </el-row>
+                        <el-row v-if="splitFlag && listQuery.searchText" style="margin-top: 10px;">
+                            <el-col :span="24">
+                                <div :class="isMobile ? 'keyword-display-mobile' : ''"
+                                     :style="!isMobile ? 'padding: 8px 12px; background: #f0f9ff; border-left: 3px solid #409eff; border-radius: 4px; font-size: 13px;' : ''">
+                                    <span style="color: #606266; margin-right: 8px;">当前分词:</span>
+                                    <span style="color: #409eff; font-weight: 500;">{{listQuery.searchText}}</span>
+                                </div>
+                            </el-col>
+                        </el-row>
+
+                        <el-row style="margin-top: 10px;">
+                            <el-col :span="24">
+                                <el-collapse v-model="activeCollapseNames" @change="handleCollapseChange">
+                                    <el-collapse-item title="高级搜索选项" name="advanced">
+                                        <el-row :gutter="isMobile ? 8 : 20">
+                                            <el-col :xs="24" :sm="8" :md="8" :lg="8">
+                                                <el-form-item label="文本分割"
+                                                              :label-width="isMobile ? '70px' : '80px'">
+                                                    <el-radio-group v-model="splitFlag"
+                                                                    :size="isMobile ? 'mini' : 'small'">
+                                                        <el-radio-button :label="false">关闭</el-radio-button>
+                                                        <el-radio-button :label="true">开启</el-radio-button>
+                                                    </el-radio-group>
+                                                </el-form-item>
+                                            </el-col>
+                                            <el-col :xs="24" :sm="8" :md="8" :lg="8" v-if="splitFlag">
+                                                <el-form-item label="关键词数"
+                                                              :label-width="isMobile ? '70px' : '80px'">
+                                                    <el-input-number :size="isMobile ? 'mini' : 'small'"
+                                                                     v-model="keyNum" :min="1" :max="10"
+                                                                     @change="keyNumChange"></el-input-number>
+                                                </el-form-item>
+                                            </el-col>
+                                            <el-col :xs="24" :sm="8" :md="8" :lg="8">
+                                                <el-form-item label="文件类型"
+                                                              :label-width="isMobile ? '70px' : '80px'">
+                                                    <el-radio-group v-model="listQuery.fileType"
+                                                                    :size="isMobile ? 'mini' : 'small'">
+                                                        <el-radio-button :label="0">全部</el-radio-button>
+                                                        <el-radio-button :label="1">仅目录</el-radio-button>
+                                                        <el-radio-button :label="2">仅文件</el-radio-button>
+                                                    </el-radio-group>
+                                                </el-form-item>
+                                            </el-col>
+                                        </el-row>
+                                        <el-row :gutter="isMobile ? 8 : 20" style="margin-top: 10px;">
+                                            <el-col :xs="24" :sm="8" :md="8" :lg="8">
+                                                <el-form-item label="排序方式"
+                                                              :label-width="isMobile ? '70px' : '80px'">
+                                                    <el-select v-model="listQuery.sortBy"
+                                                               :size="isMobile ? 'mini' : 'small'"                                                               style="width: 100%;">
+                                                        <el-option label="时间" :value="0"></el-option>
+                                                        <el-option label="名称" :value="1"></el-option>
+                                                        <el-option label="大小" :value="2"></el-option>
+                                                    </el-select>
+                                                </el-form-item>
+                                            </el-col>
+                                            <el-col :xs="24" :sm="8" :md="8" :lg="8">
+                                                <el-form-item label="排序顺序"
+                                                              :label-width="isMobile ? '70px' : '80px'">
+                                                    <el-radio-group v-model="listQuery.sortOrder"
+                                                                    :size="isMobile ? 'mini' : 'small'">
+                                                        <el-radio-button :label="0">降序</el-radio-button>
+                                                        <el-radio-button :label="1">升序</el-radio-button>
+                                                    </el-radio-group>
+                                                </el-form-item>
+                                            </el-col>
+                                        </el-row>
+
+                                        <el-row :gutter="isMobile ? 8 : 20" style="margin-top: 10px;">
+                                            <el-col :xs="24" :sm="12" :md="12" :lg="12">
+                                                <el-form-item label="地址" :label-width="isMobile ? '70px' : '80px'">
+                                                    <el-select v-model="skipUrl" @change="skipChange"
+                                                               :disabled="urlObj==null"
+                                                               :size="isMobile ? 'mini' : 'small'"
+                                                               style="width: 100%;">
+                                                        <el-option v-for="item in urlOptions"
+                                                                   :key="item.label"
+                                                                   :value="item.value"
+                                                                   :label="item.label">
+                                                        </el-option>
+                                                    </el-select>
+                                                </el-form-item>
+                                            </el-col>
+                                            <el-col :xs="24" :sm="12" :md="12" :lg="12" style="text-align: right;">
+                                                <el-button :size="isMobile ? 'mini' : 'small'" icon="el-icon-s-data"
+                                                           @click="handleCompare">
+                                                    对比
+                                                </el-button>
+                                                <el-button type="warning" :size="isMobile ? 'mini' : 'small'"
+                                                           icon="el-icon-download" @click="exportInvalidFile">
+                                                    导出无效文件
+                                                </el-button>
+                                                <el-button type="danger" :size="isMobile ? 'mini' : 'small'"
+                                                           icon="el-icon-switch-button" @click="clearAllCookies">
+                                                    退出登录
+                                                </el-button>
+                                            </el-col>
+                                        </el-row>
+                                    </el-collapse-item>
+                                </el-collapse>
+                            </el-col>
+                        </el-row>
+                    </el-form>
+
+                </el-header>
+                <el-main>
+                    <div class="mobile-scroll-hint" v-if="isMobile">
+                        <i class="el-icon-info"></i> 左右滑动查看完整表格
+                    </div>
+                    <div class="mobile-table-wrapper">
+                        <el-table
+                                ref="multipleTable"
+                                tooltip-effect="dark"
+                                :data="tableData"
+                                @selection-change="handleSelectionChange"
+                                style="width: 100%"
+                                :class="{'mobile-table': isMobile}">
+                            <el-table-column
+                                    type="selection"
+                                    :width="isMobile ? 45 : 50">
+                            </el-table-column>
+                            <el-table-column
+                                    prop="name"
+                                    label="名称"
+                                    :width="isMobile ? 120 : 200"
+                                    show-overflow-tooltip>
+                                <template slot-scope="scope">
+                                    <el-link :underline="false" @click="skip(scope.row)"><span
+                                            v-html="scope.row.name"></span></el-link>
+                                </template>
+                            </el-table-column>
+                            <el-table-column
+                                    prop="dir"
+                                    label="类型"
+                                    :width="isMobile ? 70 : 100">
+                            </el-table-column>
+                            <el-table-column
+                                    prop="path"
+                                    label="路径"
+                                    min-width="150"
+                                    show-overflow-tooltip>
+                            </el-table-column>
+                            <el-table-column
+                                    prop="changeTime"
+                                    label="时间"
+                                    :width="isMobile ? 110 : 160">
+                            </el-table-column>
+                            <el-table-column
+                                    prop="size"
+                                    label="大小"
+                                    :width="isMobile ? 70 : 100">
+                            </el-table-column>
+                            <el-table-column
+                                    fixed="right"
+                                    label="操作"
+                                    :width="isMobile ? 160 : 110">
+                                <template slot-scope="scope">
+                                    <div style="display: flex; flex-direction: column; gap: 4px; padding: 4px 0; align-items: flex-start;">
+                                        <el-button
+                                                @click.native.prevent="copyPath(scope.row)"
+                                                type="primary"
+                                                size="mini"
+                                                icon="el-icon-document-copy">
+                                            复制
+                                        </el-button>
+                                        <el-button
+                                                @click.native.prevent="createTmp(scope.row)"
+                                                type="success"
+                                                size="mini"
+                                                icon="el-icon-plus">
+                                            创建
+                                        </el-button>
+                                        <el-popconfirm
+                                                icon="el-icon-warning"
+                                                icon-color="#ff7675"
+                                                title="确定删除吗？"
+                                                @confirm="delFile(scope.row)"
+                                        >
+                                            <el-button type="danger" slot="reference" size="mini" icon="el-icon-delete">
+                                                删除
+                                            </el-button>
+                                        </el-popconfirm>
+                                    </div>
+                                </template>
+                            </el-table-column>
+
+
+                        </el-table>
+                    </div>
+                </el-main>
+            </el-container>
+
+            <div class="pagination-container" style="margin-top:16px;text-align:right;">
+                <el-pagination
+                        background
+                        :layout="isMobile ? 'total,prev,pager,next' : 'total, sizes,prev, pager, next,jumper'"
+                        :page-size="listQuery.pageSize"
+                        :page-sizes="[10,20,50,100]"
+                        :pager-count="5"
+                        :current-page.sync="listQuery.pageNum"
+                        :total="total"
+                        @size-change="handleSizeChange"
+                        @current-change="handleCurrentChange"
+                />
+            </div>
+
+            <el-dialog
+                    title="登录"
+                    :visible.sync="dialogVisible"
+                    :width="isMobile ? '90%' : '30%'"
+                    :before-close="handleClose"
+                    v-loading="loginLoading"
+            >
+                <el-form :model="loginData" :label-width="isMobile ? '60px' : '50px'" @submit.native.prevent>
+                    <el-form-item label="账号">
+                        <el-input v-model="loginData.name" placeholder="账号" clearable></el-input>
+                    </el-form-item>
+
+                    <el-form-item label="密码">
+                        <el-input v-model="loginData.pwd" show-password placeholder="密码"
+                                  @keyup.enter.native="login"></el-input>
+                    </el-form-item>
+                </el-form>
+                <span slot="footer" class="dialog-footer">
+                    <el-button @click="handleClose">取 消</el-button>
+                    <el-button type="primary" @click="login">确 定</el-button>
+                </span>
+            </el-dialog>
+
+            <el-dialog
+                    title="新增"
+                    :visible.sync="dialogVisibleAdd"
+                    :width="isMobile ? '90%' : '30%'"
+                    :before-close="handleClose"
+
+            >
+                <el-form :model="watchData" :label-width="isMobile ? '60px' : '50px'" @submit.native.prevent>
+                    <el-form-item label="主机">
+                        <el-select
+                                v-model="watchData.index" placeholder="主机" clearable style="width: 100%;">
+                            <el-option
+                                    v-for="item in hostNameData"
+                                    :key="item.id"
+                                    :label="item.hostName"
+                                    :value="item.id">
+                            </el-option>
+                        </el-select>
+                    </el-form-item>
+
+                    <el-form-item label="用户">
+                        <el-select
+                                multiple
+                                v-model="watchData.uId" placeholder="用户" style="width: 100%;"
+                        >
+                            <el-option
+                                    v-for="item in userData"
+                                    :key="item.id"
+                                    :label="item.name"
+                                    :value="item.id">
+                            </el-option>
+                        </el-select>
+                    </el-form-item>
+                    <el-form-item label="路径">
+                        <el-input v-model="watchData.path" placeholder="路径"
+                        ></el-input>
+                    </el-form-item>
+                    <el-form-item label="主机">
+                        <el-input v-model="watchData.url" placeholder="自定义主机"
+                        ></el-input>
+                    </el-form-item>
+                </el-form>
+                <span slot="footer" class="dialog-footer">
+                    <el-button @click="handleCloseAdd">取 消</el-button>
+                    <el-button type="primary" @click="addWatch" :loading="addLoading">确 定</el-button>
+                </span>
+            </el-dialog>
+        </div>
+    </template>
+</div>
+</body>
+
+<script type="text/javascript">
+    const defualtListQuery = {
+        pageNum: 1,
+        pageSize: 10,
+        offset: 0,
+        key: null,
+        searchText: null,
+        fileType: 0,
+        sortBy: 0,
+        sortOrder: 0
+    };
+    const defualtLogin = {
+        name: "",
+        pwd: "",
+    };
+    const defualtWatch = {
+        uId: [],
+        path: "",
+        index: null,
+        url: "",
+    };
+    var v1 = new Vue({
+        el: "#app",
+        data: function () {
+            return {
+                skipUrl: localStorage.getItem("fileSwageerRadio"),
+                urlObj: [],
+                urlOptions: [],
+                splitFlag: true,
+                isMobile: false,
+                listQuery: Object.assign({}, defualtListQuery),
+                loginData: Object.assign({}, defualtLogin),
+                watchData: Object.assign({}, defualtWatch),
+                tableData: [],
+                hostNameData: [],
+                userData: [],
+                total: null,
+                keyNum: localStorage.getItem("fileSwageerKeyNum") || 2,
+                config_url: "",
+                // config_url: "",
+                skipReplace: "",
+                dialogVisible: false,
+                loading: false,
+                loginLoading: false,
+                addLoading: false,
+                dialogVisibleAdd: false,
+                token: null,
+                multipleSelection: [],
+                compareResult: {},
+                activeCollapseNames: localStorage.getItem("fileSwageerAdvancedOpen") === "true" ? ["advanced"] : []
+
+            }
+        },
+        created() {
+            this.token = localStorage.getItem('fileSwageerToken')
+            axios.interceptors.response.use(
+                response => response,
+                error => {
+                    if (error.response && error.response.status === 401) {
+                        this.dialogVisible = true
+                        this.$message.error(error.response.data.message || '未授权访问')
+                    }
+                    return Promise.reject(error)
+                }
+            )
+            if (this.token) {
+                axios.defaults.headers['token'] = this.token;
+            }
+            this.getUrlOptions()
+        },
+        mounted() {
+            this.checkMobile();
+            window.addEventListener('resize', this.checkMobile);
+        },
+        beforeDestroy() {
+            window.removeEventListener('resize', this.checkMobile);
+        },
+        methods: {
+            getUrlOptions() {
+                axios.get(this.config_url + "/filess/openUrl").then(res => {
+                    if (res.data.status === 200) {
+                        let data = res.data.data
+                        console.log(data)
+                        this.skipReplace = data.replace
+                        // 将 map 转换为数组格式供 select 使用
+                        this.urlOptions = Object.keys(data.urls).map(key => {
+                            return {
+                                label: key,
+                                value: data.urls[key]
+                            }
+                        })
+
+                    } else {
+                        this.$message.warning('获取地址失败');
+                    }
+                })
+            },
+            checkMobile() {
+                this.isMobile = window.innerWidth <= 768;
+            },
+            handleCollapseChange(val) {
+                const isOpen = val.includes("advanced");
+                localStorage.setItem("fileSwageerAdvancedOpen", isOpen);
+            },
+            keyNumChange() {
+                localStorage.setItem("fileSwageerKeyNum", this.keyNum)
+            },
+            async post(url, data) {
+                let result
+                await axios.post(url, data).then(res => {
+                    if (res.status === 200 && res.data.status === 200) {
+                        result = res.data
+                    } else {
+                        this.$message.error(res.data.message);
+                    }
+                }).catch(err => {
+                    this.$message.error(err);
+                }).finally(() => {
+                    this.toggleLoginLoading()
+                })
+                return result
+            },
+            async handleCompare() {
+                if (this.multipleSelection.length != 2) {
+                    this.$message.warning("需要选择两个文件");
+                    return
+                }
+                this.toggleLoginLoading()
+
+                let path1 = this.multipleSelection[0].path
+                let path2 = this.multipleSelection[1].path
+                let key = path1 + path2
+                if (this.compareResult[key]) {
+                    this.$message.success(this.compareResult[key])
+                    return;
+                }
+                let data = await this.post(this.config_url + "/files/compare", {path1, path2})
+                debugger
+                if (data) {
+                    this.$message.success(data.data)
+                    this.compareResult[key] = data.data
+                }
+            },
+            handleSelectionChange(val) {
+                this.multipleSelection = val;
+            },
+            formatDate(ms) {
+                const date = new Date(ms);
+                let format = 'YYYY-MM-DD HH:mm:ss'
+                const map = {
+                    'YYYY': date.getFullYear(),
+                    'MM': String(date.getMonth() + 1).padStart(2, '0'),
+                    'DD': String(date.getDate()).padStart(2, '0'),
+                    'HH': String(date.getHours()).padStart(2, '0'),
+                    'mm': String(date.getMinutes()).padStart(2, '0'),
+                    'ss': String(date.getSeconds()).padStart(2, '0'),
+                    'SSS': String(date.getMilliseconds()).padStart(3, '0')
+                };
+
+                return format.replace(/YYYY|MM|DD|HH|mm|ss|SSS/g, match => map[match]);
+            },
+            login() {
+                if (this.loginData.name && this.loginData.pwd) {
+                    this.toggleLoginLoading()
+                    axios.post(this.config_url + "/filess/login", this.loginData).then(res => {
+                        if (res.status === 200 && res.data.status === 200) {
+                            localStorage.setItem('fileSwageerToken', res.data.data)
+                            this.token = res.data.data
+                            axios.defaults.headers['token'] = this.token;
+                            this.getUrlOptions()
+                            this.handleClose()
+                        } else {
+                            this.$message.error(res.data.message);
+                        }
+                    }).catch(err => {
+                        this.$message.error(err);
+                    }).finally(() => {
+                        this.toggleLoginLoading()
+                    })
+                }
+            },
+            async copyPath(row) {
+                try {
+                    navigator.clipboard.writeText(row.path);
+                    this.$message.success('已复制到剪贴板');
+                } catch (err) {
+                    console.error('设置剪贴板出错: ', err);
+                    this.$message.error('复制失败');
+                }
+            },
+            createTmp(row) {
+                let name = row.nameC
+                if (!this.isDir(row)) {
+                    name = name.slice(0, name.lastIndexOf(".")) + '-' + row.size
+                }
+                let url = this.config_url + "/filess/create"
+                axios.post(url, {'names': [name]}).then(res => {
+                    if (res.data.status === 200) {
+                        this.$message.success(res.data.message);
+                    } else {
+                        this.$message.error(res.data.message);
+                    }
+                }).catch(err => {
+                    this.$message.error(err);
+                }).finally(() => {
+                })
+            },
+            exportInvalidFile() {
+                this.$confirm('确定要导出无效文件吗？', '提示', {
+                    confirmButtonText: '确定',
+                    cancelButtonText: '取消',
+                    type: 'warning'
+                }).then(() => {
+                    axios({
+                        method: 'post',
+                        url: this.config_url + '/filess/exportInvalid',
+                        responseType: 'blob'
+                    }).then(response => {
+                        const url = window.URL.createObjectURL(new Blob([response.data]));
+                        const link = document.createElement('a');
+                        link.href = url;
+                        const disposition = response.headers['content-disposition'];
+                        let filename = 'invalid_nodes.json';
+                        if (disposition) {
+                            const match = disposition.match(/filename=(.+)/);
+                            if (match && match[1]) {
+                                filename = decodeURIComponent(match[1]);
+                            }
+                        }
+                        link.setAttribute('download', filename);
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        window.URL.revokeObjectURL(url);
+                    });
+                });
+            },
+            delFile(row) {
+                this.toggleAddLoading()
+                let data, url
+                if (row.invalid) {
+
+                    data = {"id": row.id}
+                    url = this.config_url + "/filess/deleteInvalid"
+                } else {
+
+                    data = {"path": row.path}
+                    url = this.config_url + "/filess/delete"
+                }
+                axios.post(url, data).then(res => {
+                    if (res.data.status === 200) {
+                        this.$message.success(res.data.message);
+                        this.dialogVisibleAdd = false
+                    } else {
+                        this.$message.error(res.data.message);
+                    }
+                }).catch(err => {
+                    this.$message.error(err);
+                }).finally(() => {
+                    this.toggleAddLoading()
+                })
+            },
+            handleClose() {
+                this.dialogVisible = false
+                this.loginData = Object.assign({}, defualtLogin)
+            },
+            handleCloseAdd() {
+                this.dialogVisibleAdd = false
+                this.watchData = Object.assign({}, defualtWatch)
+            },
+            skipChange(val) {
+                if (!this.urlOptions || this.urlOptions.length === 0) {
+                    this.dialogVisible = true
+                    return
+                }
+                localStorage.setItem("fileSwageerRadio", val)
+            },
+            skip(row) {
+                let path = row.path.replace(this.skipReplace, this.skipUrl)
+                window.open(path);
+            },
+            isDir(row) {
+                if (!row.size || (row.dir && row.dir === 1)) {
+                    return true
+                }
+                return false
+            },
+            handleSearch() {
+                this.listQuery.pageNum = 1;
+                this.listQuery.offset = 0
+                this.getList();
+            },
+            async getClipboardContent() {
+                try {
+                    const text = await navigator.clipboard.readText();
+                    this.listQuery.key = text
+                    this.handleSearch()
+                } catch (err) {
+                    console.error('读取剪贴板出错: ', err);
+                    this.$message.error('读取剪贴板失败，请手动输入');
+                }
+            },
+            handleCurrentChange(val) {
+                window.scrollTo(0, 0);
+                this.getList();
+            },
+            clearAllCookies() {
+                localStorage.removeItem('fileSwageerToken');
+                delete axios.defaults.headers['token'];
+                const cookies = document.cookie.split(';');
+
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i];
+                    const eqPos = cookie.indexOf('=');
+                    const name = eqPos > -1 ? cookie.substr(0, eqPos) : cookie;
+                    document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT';
+                }
+            },
+            add() {
+                this.users()
+                this.hostNames()
+                this.dialogVisibleAdd = true
+            },
+            handleSizeChange(val) {
+                window.scrollTo(0, 0);
+                this.listQuery.pageNum = 1;
+                this.listQuery.offset = 0
+                this.listQuery.pageSize = val;
+                this.getList();
+            },
+            formatFileSize(sizeInBytes) {
+                if (sizeInBytes) {
+                    const units = ["B", "KB", "MB", "GB", "TB"];
+                    let unitIndex = 0;
+                    let fileSize = parseFloat(sizeInBytes);
+                    while (fileSize >= 1024 && unitIndex < units.length - 1) {
+                        fileSize /= 1024;
+                        unitIndex++;
+                    }
+                    const formattedSize = fileSize.toFixed(2);
+                    const unit = units[unitIndex];
+                    return `${formattedSize} ${unit}`;
+                }
+                return "";
+            },
+            toggleLoading() {
+                this.loading = !this.loading;
+                if (this.loading) {
+                    this.stopScroll();
+                } else {
+                    this.canScroll();
+                }
+            },
+            toggleLoginLoading() {
+                this.loginLoading = !this.loginLoading;
+                if (this.loginLoading) {
+                    this.stopScroll();
+                } else {
+                    this.canScroll();
+                }
+            },
+            toggleAddLoading() {
+                this.addLoading = !this.addLoading;
+            },
+            stopScroll() {
+                document.body.style.overflow = 'hidden';
+                document.addEventListener('touchmove', this.preventDefault, {passive: false});
+            },
+            canScroll() {
+                document.body.style.overflow = '';
+                document.removeEventListener('touchmove', this.preventDefault);
+            },
+            preventDefault(e) {
+                e.preventDefault();
+            },
+            splitBySymbols(text) {
+                const pattern = /[^\p{L}\p{N}]+/gu;
+                const cleanParts = text.split(pattern).filter((part) => part);
+                return cleanParts;
+            },
+            getLongestTwoStrings(stringList) {
+                const sortedStrings = stringList.sort((a, b) => b.length - a.length);
+                return sortedStrings.slice(0, this.keyNum);
+            },
+            async getList() {
+                if (!this.listQuery.key) {
+                    return
+                }
+                let arr = []
+                this.toggleLoading()
+                if (this.splitFlag) {
+                    arr = this.getLongestTwoStrings(this.splitBySymbols(this.listQuery.key));
+                } else {
+                    arr.push(this.listQuery.key)
+                }
+                let tmpSearch = ''
+                for (let i = 0; i < arr.length; i++) {
+                    arr[i] = arr[i].length > 10 ? arr[i].slice(0, 10) : arr[i]
+                    tmpSearch = tmpSearch === '' ? arr[i] : tmpSearch + "、" + arr[i]
+                }
+                arr = arr.map(item => item.toLowerCase())
+                let offset = (this.listQuery.pageNum - 1) * this.listQuery.pageSize
+                this.listQuery.searchText = tmpSearch
+                new Promise((resolve, reject) => {
+                    axios.post(this.config_url + "/filess/search", {
+                        offset: offset,
+                        limit: this.listQuery.pageSize,
+                        key: arr,
+                        sortBy: this.listQuery.sortBy,
+                        sortOrder: this.listQuery.sortOrder,
+                        fileType: this.listQuery.fileType
+                    }).then(res => {
+                        if (res.data.status === 200) {
+                            this.tableData = []
+                            let data = res.data.data.results
+                            this.total = res.data.data.total
+                            for (let i = 0; i < data.length; i++) {
+                                let size = data[i].size
+                                data[i].name = data[i].name.toString()
+                                data[i].changeTime = this.formatDate(data[i].modTime * 1000)
+                                if (size > 0) {
+                                    data[i].size = this.formatFileSize(data[i].size)
+                                }
+                                data[i].dir = data[i].isDir ? '目录' : '文件'
+                                data[i].nameC = data[i].name
+                                if (arr && arr.length > 0) {
+                                    data[i].name = this.highlightKeywords(data[i].name, arr)
+                                }
+
+                                this.tableData = data
+                            }
+                            resolve()
+                        } else {
+                            this.$message.warning(res.data.message);
+                            reject(res.data.message)
+                        }
+                    }).catch(e => {
+                        console.log(e)
+                        reject(e)
+                    })
+                }).then(() => {
+                    this.toggleLoading()
+                }).catch(err => {
+                    this.toggleLoading()
+                })
+            },
+            highlightKeywords(text, keywords) {
+                if (!keywords || keywords.length === 0) return text
+
+                let result = text
+                keywords.forEach(keyword => {
+                    if (keyword) {
+                        const regex = new RegExp(`(${this.escapeRegExp(keyword)})`, 'gi')
+                        result = result.replace(regex, '<span class="highlight">$1</span>')
+                    }
+                })
+                return result
+            },
+
+            escapeRegExp(string) {
+                return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            },
+            addWatch() {
+                this.toggleAddLoading()
+                let url
+                if (this.watchData.url) {
+                    url = this.watchData.url + "/files/watch/addWatch"
+                } else {
+                    url = this.config_url + "/files/watch/addWatch"
+                }
+                axios.post(url, this.watchData).then(res => {
+                    if (res.data.status === 200) {
+                        this.$message.success('添加成功');
+                        this.dialogVisibleAdd = false
+                    } else {
+                        this.$message.error(res.data.message);
+                    }
+                }).catch(err => {
+                    this.$message.error(err);
+                }).finally(() => {
+                    this.toggleAddLoading()
+                })
+            },
+        }
+    })
+</script>
+</html>

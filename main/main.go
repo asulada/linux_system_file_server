@@ -1,6 +1,7 @@
 package main
 
 import (
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,12 +18,19 @@ import (
 	"go.uber.org/zap"
 )
 
+//go:embed static/*
+var staticFiles embed.FS
 var (
 	logger     *zap.SugaredLogger
 	selfConfig Config
 	fileSystem *FileSystemIndex
 	re         = regexp.MustCompile(`^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$`)
 )
+
+type SkipConfig struct {
+	Replace string            `mapstructure:"replace" json:"replace"`
+	Urls    map[string]string `mapstructure:"urls" json:"urls"`
+}
 
 type Config struct {
 	Log           logConfig.LogConfig
@@ -34,17 +42,18 @@ type Config struct {
 	ExcludeSuffix []string
 	WalPath       string
 	WALThreshold  int64
+	Skip          SkipConfig `mapstructure:"skip"`
 }
 
-func initLog() *zap.SugaredLogger {
-	err := logConfig.InitLogger(selfConfig.Log)
+func initLog() (*zap.SugaredLogger, func()) {
+	cleanup, err := logConfig.InitLogger(selfConfig.Log)
 	if err != nil {
 		fmt.Println(err)
 	}
 	// L()：获取全局logger
 	logger := zap.L()
 	zap.ReplaceGlobals(logger)
-	return logger.Sugar()
+	return logger.Sugar(), cleanup
 }
 
 func initConfig() {
@@ -203,7 +212,10 @@ func saveName(name string) {
 	searchCache.InvalidateByNewFile(name)
 	WriteWALInvalid(&node, name)
 }
+func openUrl(context *gin.Context) {
 
+	SendResponse(context, http.StatusOK, "", selfConfig.Skip)
+}
 func exportInvalid(context *gin.Context) {
 
 	var invalidNodes []string
@@ -310,8 +322,10 @@ func TimingMiddleware() gin.HandlerFunc {
 
 func main() {
 	initConfig()
-	logger = initLog()
-	defer logger.Sync() // 别忘了退出前刷新缓存
+	var logCleanup func()
+	logger, logCleanup = initLog()
+	defer logCleanup()  // 退出前关闭日志写入器，停止定时任务
+	defer logger.Sync() // 刷新日志缓存
 
 	fileSystem = NewFileSystemIndex()
 	fileSystem.Start(selfConfig.Roots, selfConfig.DumpPath)
@@ -323,15 +337,57 @@ func main() {
 	ginServer.Use(ErrorHandlingMiddleware())
 	ginServer.Use(TimingMiddleware())
 
-	// 设置静态文件目录，将 /static 路径映射到 static 文件夹
-	ginServer.Static("/static", "./static")
+	// 使用 embed.FS 提供静态文件服务
+	ginServer.GET("/static/*filepath", func(c *gin.Context) {
+		filePath := c.Param("filepath")
+		if filePath == "" || filePath == "/" {
+			c.Redirect(http.StatusMovedPermanently, "/")
+			return
+		}
 
-	// 设置根路径默认访问 index-go.html
-	ginServer.LoadHTMLGlob("static/*")
-	ginServer.GET("/", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "index-go.html", gin.H{})
+		// 去掉开头的 /
+		content, err := staticFiles.ReadFile("static" + filePath)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{
+				"message": "File not found",
+			})
+			return
+		}
+
+		// 根据文件扩展名设置 Content-Type
+		contentType := "application/octet-stream"
+		if len(filePath) > 4 {
+			ext := filePath[len(filePath)-4:]
+			switch ext {
+			case ".css":
+				contentType = "text/css; charset=utf-8"
+			case ".js":
+				contentType = "application/javascript; charset=utf-8"
+			case ".png":
+				contentType = "image/png"
+			case ".jpg", ".peg":
+				contentType = "image/jpeg"
+			case ".gif":
+				contentType = "image/gif"
+			case ".svg":
+				contentType = "image/svg+xml"
+			}
+		}
+
+		c.Data(http.StatusOK, contentType, content)
 	})
 
+	// 根路径返回 index-go.html（不使用模板引擎，直接返回文件内容）
+	ginServer.GET("/", func(c *gin.Context) {
+		content, err := staticFiles.ReadFile("static/index-go.html")
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"message": "Internal Server Error",
+			})
+			return
+		}
+		c.Data(http.StatusOK, "text/html; charset=utf-8", content)
+	})
 	// 自定义404错误处理
 	ginServer.NoRoute(func(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{
@@ -339,6 +395,7 @@ func main() {
 		})
 	})
 	files := ginServer.Group("/filess")
+
 	{
 		//访问地址，处理我们的请求 Request Response
 		files.POST("/login", login)
@@ -347,6 +404,7 @@ func main() {
 		files.POST("/delete", BasicAuthMiddleware(), deleteFile)
 		files.POST("/deleteInvalid", BasicAuthMiddleware(), deleteInvalid)
 		files.POST("/exportInvalid", BasicAuthMiddleware(), exportInvalid)
+		files.GET("/openUrl", BasicAuthMiddleware(), openUrl)
 	}
 	logger.Info("9102端口启动成功")
 	//服务器端口

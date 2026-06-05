@@ -567,14 +567,15 @@ func (f *FileSystemIndex) runEventLoop(fd int) {
 			if name == "" || name == "." || name == ".." {
 				continue
 			}
-			if f.ignoreSuffix(name) {
+			isDir := (mask & unix.IN_ISDIR) != 0
+
+			if !isDir && f.ignoreSuffix(name) {
 				continue
 			}
 			// 解析事件名称
 			eventDesc := getEventNames(mask)
 
 			parentOffset := GetWdPath(int(event.Wd))
-			isDir := (mask & unix.IN_ISDIR) != 0
 			dirPath := GetPathUint64(parentOffset)
 			fullPath := filepath.Join(dirPath, name)
 

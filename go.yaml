@@ -1,3 +1,4 @@
+# 日志配置
 log:
   level: info
   filename: ./logs/default.log
@@ -7,9 +8,12 @@ log:
   isstacktrace: true
   isstdout: true
 
+# 监控的根目录
 roots:
   - /root/go/2
   - /root/go/5
+
+# 忽略文件后缀
 excludeSuffix:
   - .log
   - .torrent
@@ -18,9 +22,22 @@ excludeSuffix:
   - .swx
   - 4913
   - "~"
+
+# 跳转配置（支持openlist）
+skip:
+  replace: /root/go/
+  urls:
+    internet: http://127.0.0.1:8080/api/v1/file/add
+    intranet1: http://192.168.1.100:8080/api/v1/file/add
+
+# 数据文件
 dumpPath: ./index.db
+# wal临时文件
+walPath: ./index.wal
+# wal文件写入阈值
+wALThreshold: 100
+
+# web访问额账号
 account: admin
 password: admin
 jwtSecret: your-super-secret-key-here-2024
-walPath: ./index.wal
-wALThreshold: 100

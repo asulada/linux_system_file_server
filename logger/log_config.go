@@ -34,6 +34,7 @@ type dailyRotateWriter struct {
 	maxAge       int
 	isStdout     bool
 	mu           sync.Mutex
+	stopChan     chan struct{} // 用于停止定时任务
 }
 
 // Write 实现 io.Writer 接口
@@ -41,10 +42,32 @@ func (w *dailyRotateWriter) Write(p []byte) (n int, err error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	// 检查日期是否变化
+	return w.currentFile.Write(p)
+}
+
+// startRotationChecker 启动定时检查任务，每分钟检查一次日期变化
+func (w *dailyRotateWriter) startRotationChecker() {
+	ticker := time.NewTicker(time.Minute)
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				w.checkAndRotate()
+			case <-w.stopChan:
+				ticker.Stop()
+				return
+			}
+		}
+	}()
+}
+
+// checkAndRotate 检查并执行日志文件轮换
+func (w *dailyRotateWriter) checkAndRotate() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
 	now := time.Now()
 	today := now.Format("2006-01-02")
-
 	if today != w.currentDate {
 		// 日期变化，关闭旧文件并创建新文件
 		if w.currentFile != nil {
@@ -53,8 +76,20 @@ func (w *dailyRotateWriter) Write(p []byte) (n int, err error) {
 		w.currentDate = today
 		w.currentFile = w.createLogger()
 	}
+}
 
-	return w.currentFile.Write(p)
+// Close 关闭日志写入器并停止定时任务
+func (w *dailyRotateWriter) Close() error {
+	// 停止定时任务
+	close(w.stopChan)
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.currentFile != nil {
+		return w.currentFile.Close()
+	}
+	return nil
 }
 
 // Sync 实现 zapcore.WriteSyncer 接口
@@ -78,16 +113,33 @@ func (w *dailyRotateWriter) createLogger() *lumberjack.Logger {
 	}
 }
 
-// InitLogger 初始化Logger
-func InitLogger(lCfg LogConfig) (err error) {
-	writeSyncer := getLogWriter(lCfg.FileName, lCfg.MaxSize, lCfg.MaxBackups, lCfg.MaxAge, lCfg.IsStdout)
+// InitLogger 初始化Logger，返回清理函数用于程序退出时关闭日志写入器
+func InitLogger(lCfg LogConfig) (cleanup func(), err error) {
+	// 1. 创建 INFO 级别的 Writer
+	infoWriter, infoRotate := getLogWriter(lCfg.FileName, lCfg.MaxSize, lCfg.MaxBackups, lCfg.MaxAge, lCfg.IsStdout)
+
+	// 2. 创建 ERROR 级别的 Writer (文件名通常为 default-error.log)
+	ext := filepath.Ext(lCfg.FileName)
+	nameWithoutExt := strings.TrimSuffix(lCfg.FileName, ext)
+	errorFileName := nameWithoutExt + "-error" + ext
+	errorWriter, errorRotate := getLogWriter(errorFileName, lCfg.MaxSize, lCfg.MaxBackups, lCfg.MaxAge, lCfg.IsStdout)
+
 	encoder := getEncoder()
 	var l = new(zapcore.Level)
 	err = l.UnmarshalText([]byte(lCfg.Level))
 	if err != nil {
-		return
+		return nil, err
 	}
-	core := zapcore.NewCore(encoder, writeSyncer, l)
+
+	// 3. 定义不同级别的核心
+	// INFO 核心：记录 INFO 及以上级别，但排除 ERROR 及以上（如果需要严格分离）
+	// 通常做法：INFO 文件记录所有 >= INFO 的日志，ERROR 文件只记录 >= ERROR 的日志
+	infoCore := zapcore.NewCore(encoder, infoWriter, zap.InfoLevel)
+	errorCore := zapcore.NewCore(encoder, errorWriter, zap.ErrorLevel)
+
+	// 4. 组合核心
+	core := zapcore.NewTee(infoCore, errorCore)
+
 	var logger *zap.Logger
 	if lCfg.IsStackTrace {
 		logger = zap.New(core, zap.AddCaller(), zap.AddStacktrace(zap.ErrorLevel))
@@ -95,7 +147,17 @@ func InitLogger(lCfg LogConfig) (err error) {
 		logger = zap.New(core, zap.AddCaller())
 	}
 	zap.ReplaceGlobals(logger)
-	return
+
+	// 返回清理函数，同时关闭两个 Writer
+	cleanup = func() {
+		if infoRotate != nil {
+			infoRotate.Close()
+		}
+		if errorRotate != nil {
+			errorRotate.Close()
+		}
+	}
+	return cleanup, nil
 }
 
 // 负责设置 encoding 的日志格式
@@ -112,7 +174,7 @@ func TimeEncoder(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
 }
 
 // 负责日志写入的位置
-func getLogWriter(filename string, maxsize, maxBackup, maxAge int, isStdout bool) zapcore.WriteSyncer {
+func getLogWriter(filename string, maxsize, maxBackup, maxAge int, isStdout bool) (zapcore.WriteSyncer, *dailyRotateWriter) {
 	ext := filepath.Ext(filename)
 	nameWithoutExt := strings.TrimSuffix(filename, ext)
 
@@ -124,17 +186,24 @@ func getLogWriter(filename string, maxsize, maxBackup, maxAge int, isStdout bool
 		maxBackups:   maxBackup,
 		maxAge:       maxAge,
 		isStdout:     isStdout,
+		stopChan:     make(chan struct{}),
 	}
 
 	rotateWriter.currentFile = rotateWriter.createLogger()
+	// 启动定时检查任务
+	rotateWriter.startRotationChecker()
 
+	var writeSyncer zapcore.WriteSyncer
 	if isStdout {
 		// dailyRotateWriter 已实现 WriteSyncer 接口，直接使用
-		return zapcore.NewMultiWriteSyncer(
+		writeSyncer = zapcore.NewMultiWriteSyncer(
 			rotateWriter,
 			zapcore.AddSync(os.Stdout),
 		)
+	} else {
+		// 直接返回，因为 dailyRotateWriter 已经实现了 WriteSyncer
+		writeSyncer = rotateWriter
 	}
-	// 直接返回，因为 dailyRotateWriter 已经实现了 WriteSyncer
-	return rotateWriter
+
+	return writeSyncer, rotateWriter
 }
