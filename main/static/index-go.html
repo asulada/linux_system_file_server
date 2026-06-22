@@ -260,7 +260,7 @@
         }
 
         /* 防止文本选择干扰触摸 */
-        .el-table {
+        .el-table__expand-ico {
             user-select: none;
             -webkit-user-select: none;
         }
@@ -268,6 +268,13 @@
         .el-button {
             user-select: none;
             -webkit-user-select: none;
+        }
+
+        /* 允许表格内容可选择和复制 */
+        .el-table td,
+        .el-table th {
+            user-select: text !important;
+            -webkit-user-select: text !important;
         }
 
         /* 表格样式优化 */
@@ -1101,14 +1108,15 @@
             highlightKeywords(text, keywords) {
                 if (!keywords || keywords.length === 0) return text
 
-                let result = text
-                keywords.forEach(keyword => {
-                    if (keyword) {
-                        const regex = new RegExp(`(${this.escapeRegExp(keyword)})`, 'gi')
-                        result = result.replace(regex, '<span class="highlight">$1</span>')
-                    }
-                })
-                return result
+                // 过滤掉空关键词并转义特殊字符
+                const validKeywords = keywords.filter(k => k).map(k => this.escapeRegExp(k))
+                if (validKeywords.length === 0) return text
+
+                // 构建一个合并的正则表达式，匹配任意一个关键词
+                const combinedRegex = new RegExp(`(${validKeywords.join('|')})`, 'gi')
+
+                // 一次性完成所有替换，避免嵌套问题
+                return text.replace(combinedRegex, '<span class="highlight">$1</span>')
             },
 
             escapeRegExp(string) {
